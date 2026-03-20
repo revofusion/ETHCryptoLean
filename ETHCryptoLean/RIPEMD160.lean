@@ -1,3 +1,7 @@
+import ETHCryptoLean.Utils
+
+open ETHCryptoLean.Utils
+
 namespace ETHCryptoLean.RIPEMD160
 
 -- Nonlinear functions
@@ -55,15 +59,6 @@ private def sR : Array UInt32 := #[
 private def h0Init : Array UInt32 := #[
   0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0
 ]
-
-/-- Read a little-endian UInt32 from 4 bytes starting at index `i`. -/
-@[inline] private def readLE32 (data : Array UInt8) (i : Nat) : UInt32 :=
-  data[i]!.toUInt32 ||| (data[i+1]!.toUInt32 <<< 8) |||
-  (data[i+2]!.toUInt32 <<< 16) ||| (data[i+3]!.toUInt32 <<< 24)
-
-/-- Write a little-endian UInt32 to 4 bytes. -/
-@[inline] private def writeLE32 (v : UInt32) : Array UInt8 :=
-  #[v.toUInt8, (v >>> 8).toUInt8, (v >>> 16).toUInt8, (v >>> 24).toUInt8]
 
 /-- Select the nonlinear function for round j (0..79). -/
 @[inline] private def selectF (j : Nat) (x y z : UInt32) : UInt32 :=
@@ -173,16 +168,5 @@ def ripemd160 (input : Array UInt8) : Array UInt8 :=
     for i in [:5] do
       result := result ++ writeLE32 finalH[i]!
     return result
-
-/-- Convert a byte array to a hex string. -/
-private def hexDigit (n : Nat) : Char :=
-  if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-
-def toHex (bytes : Array UInt8) : String :=
-  bytes.foldl (fun acc b =>
-    let hi := (b.toNat >>> 4) &&& 0x0F
-    let lo := b.toNat &&& 0x0F
-    acc ++ String.ofList [hexDigit hi, hexDigit lo]
-  ) ""
 
 end ETHCryptoLean.RIPEMD160

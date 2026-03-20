@@ -1,3 +1,7 @@
+import ETHCryptoLean.Utils
+
+open ETHCryptoLean.Utils
+
 namespace ETHCryptoLean.Blake2f
 
 -- BLAKE2b IV constants
@@ -30,38 +34,6 @@ def sigma : Array (Array UInt8) := #[
 /-- Rotate a UInt64 right by `n` bits. -/
 @[inline] def ror64 (x : UInt64) (n : UInt64) : UInt64 :=
   (x >>> n) ||| (x <<< (64 - n))
-
-/-- Read a little-endian UInt64 from 8 bytes starting at `offset`. -/
-def readLE64 (data : ByteArray) (offset : Nat) : UInt64 :=
-  let b0 := (data[offset]!).toUInt64
-  let b1 := (data[offset + 1]!).toUInt64
-  let b2 := (data[offset + 2]!).toUInt64
-  let b3 := (data[offset + 3]!).toUInt64
-  let b4 := (data[offset + 4]!).toUInt64
-  let b5 := (data[offset + 5]!).toUInt64
-  let b6 := (data[offset + 6]!).toUInt64
-  let b7 := (data[offset + 7]!).toUInt64
-  b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24) |||
-  (b4 <<< 32) ||| (b5 <<< 40) ||| (b6 <<< 48) ||| (b7 <<< 56)
-
-/-- Read a big-endian UInt32 from 4 bytes starting at `offset`. -/
-def readBE32 (data : ByteArray) (offset : Nat) : UInt32 :=
-  let b0 := (data[offset]!).toUInt32
-  let b1 := (data[offset + 1]!).toUInt32
-  let b2 := (data[offset + 2]!).toUInt32
-  let b3 := (data[offset + 3]!).toUInt32
-  (b0 <<< 24) ||| (b1 <<< 16) ||| (b2 <<< 8) ||| b3
-
-/-- Write a UInt64 as 8 little-endian bytes. -/
-def writeLE64 (v : UInt64) : Array UInt8 :=
-  #[ (v &&& 0xFF).toUInt8,
-     ((v >>> 8) &&& 0xFF).toUInt8,
-     ((v >>> 16) &&& 0xFF).toUInt8,
-     ((v >>> 24) &&& 0xFF).toUInt8,
-     ((v >>> 32) &&& 0xFF).toUInt8,
-     ((v >>> 40) &&& 0xFF).toUInt8,
-     ((v >>> 48) &&& 0xFF).toUInt8,
-     ((v >>> 56) &&& 0xFF).toUInt8 ]
 
 /-- The BLAKE2b G mixing half-round.
     Given a state vector `v` (16 UInt64s), mix positions (a,b,c,d) with message word `mx`.
@@ -137,7 +109,7 @@ def compress (h : Array UInt64) (m : Array UInt64) (t0 t1 : UInt64)
 def blake2fPrecompile (input : ByteArray) : Option ByteArray :=
   if input.size != 213 then none
   else
-    let rounds := (readBE32 input 0).toNat
+    let rounds := (readBE32BA input 0).toNat
     -- Parse h (8 × uint64, little-endian)
     let h : Array UInt64 := Array.ofFn fun (i : Fin 8) => readLE64 input (4 + i.val * 8)
     -- Parse m (16 × uint64, little-endian)
@@ -157,91 +129,5 @@ def blake2fPrecompile (input : ByteArray) : Option ByteArray :=
         bytes.foldl (fun a b => a.push b) acc
       ) ByteArray.empty
       some out
-
-/-! ## Hex utilities for test vectors -/
-
-private def hexDigitVal (c : Char) : UInt8 :=
-  if '0' ≤ c && c ≤ '9' then c.toNat.toUInt8 - 48
-  else if 'a' ≤ c && c ≤ 'f' then c.toNat.toUInt8 - 87
-  else if 'A' ≤ c && c ≤ 'F' then c.toNat.toUInt8 - 55
-  else 0
-
-def hexToByteArray (s : String) : ByteArray :=
-  let chars := s.toList
-  let rec go (cs : List Char) (acc : ByteArray) : ByteArray :=
-    match cs with
-    | c1 :: c2 :: rest =>
-      let byte := (hexDigitVal c1) <<< 4 ||| (hexDigitVal c2)
-      go rest (acc.push byte)
-    | _ => acc
-  go chars ByteArray.empty
-
-def byteArrayToHex (ba : ByteArray) : String :=
-  let hexChar (n : UInt8) : Char :=
-    if n < 10 then Char.ofNat (48 + n.toNat)
-    else Char.ofNat (87 + n.toNat)
-  ba.foldl (fun acc b =>
-    acc ++ String.singleton (hexChar (b >>> 4)) ++ String.singleton (hexChar (b &&& 0x0F))
-  ) ""
-
-/-! ## EIP-152 test vectors proved by native_decide -/
-
-/-- EIP-152 test vector 4: 0 rounds, final=true -/
-theorem test_vector_0rounds : blake2fPrecompile
-    (hexToByteArray (
-      "00000000" ++
-      "48c9bdf267e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5d182e6ad7f520e511f6c3e2b8c68059b6bbd41fbabd9831f79217e1319cde05b" ++
-      "6162630000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" ++
-      "0300000000000000" ++ "0000000000000000" ++ "01"))
-    = some (hexToByteArray
-      "08c9bcf367e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5d282e6ad7f520e511f6c3e2b8c68059b9442be0454267ce079217e1319cde05b") := by
-  native_decide
-
-/-- EIP-152 test vector: 1 round, final=true -/
-theorem test_vector_1round : blake2fPrecompile
-    (hexToByteArray (
-      "00000001" ++
-      "48c9bdf267e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5d182e6ad7f520e511f6c3e2b8c68059b6bbd41fbabd9831f79217e1319cde05b" ++
-      "6162630000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" ++
-      "0300000000000000" ++ "0000000000000000" ++ "01"))
-    = some (hexToByteArray
-      "b63a380cb2897d521994a85234ee2c181b5f844d2c624c002677e9703449d2fba551b3a8333bcdf5f2f7e08993d53923de3d64fcc68c034e717b9293fed7a421") := by
-  native_decide
-
-/-- EIP-152 test vector 5: 12 rounds, final=true (the standard BLAKE2b("abc") test) -/
-theorem test_vector_12rounds_final : blake2fPrecompile
-    (hexToByteArray (
-      "0000000c" ++
-      "48c9bdf267e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5d182e6ad7f520e511f6c3e2b8c68059b6bbd41fbabd9831f79217e1319cde05b" ++
-      "6162630000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" ++
-      "0300000000000000" ++ "0000000000000000" ++ "01"))
-    = some (hexToByteArray
-      "ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923") := by
-  native_decide
-
-/-- EIP-152 test vector 6: 12 rounds, non-final (f=0) -/
-theorem test_vector_12rounds_nonfinal : blake2fPrecompile
-    (hexToByteArray (
-      "0000000c" ++
-      "48c9bdf267e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5d182e6ad7f520e511f6c3e2b8c68059b6bbd41fbabd9831f79217e1319cde05b" ++
-      "6162630000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" ++
-      "0300000000000000" ++ "0000000000000000" ++ "00"))
-    = some (hexToByteArray
-      "75ab69d3190a562c51aef8d88f1c2775876944407270c42c9844252c26d2875298743e7f6d5ea2f2d3e8d226039cd31b4e426ac4f2d3d666a610c2116fde4735") := by
-  native_decide
-
-/-- EIP-152: wrong input size returns none -/
-theorem test_wrong_size : blake2fPrecompile (hexToByteArray "00") = none := by
-  native_decide
-
-/-- EIP-152: invalid flag byte (not 0 or 1) returns none -/
-theorem test_invalid_flag : blake2fPrecompile
-    (hexToByteArray (
-      "0000000c" ++
-      "48c9bdf267e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5d182e6ad7f520e511f6c3e2b8c68059b6bbd41fbabd9831f79217e1319cde05b" ++
-      "6162630000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" ++
-      "0300000000000000" ++ "0000000000000000" ++ "02"))
-    = none := by
-  native_decide
 
 end ETHCryptoLean.Blake2f

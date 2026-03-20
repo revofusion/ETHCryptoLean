@@ -7,47 +7,7 @@ import ETHCryptoLean
 import Lean.Data.Json
 
 open Secp256k1
-
--- ═══════════════════════════════════════════════════════════════
--- Hex utilities
--- ═══════════════════════════════════════════════════════════════
-
-private def hexCharToNibble (c : Char) : Option UInt8 :=
-  if '0' ≤ c && c ≤ '9' then some (c.toNat - '0'.toNat).toUInt8
-  else if 'a' ≤ c && c ≤ 'f' then some (c.toNat - 'a'.toNat + 10).toUInt8
-  else if 'A' ≤ c && c ≤ 'F' then some (c.toNat - 'A'.toNat + 10).toUInt8
-  else none
-
-/-- Decode a hex string (no 0x prefix) to bytes. Returns empty on invalid input. -/
-def hexToBytes (s : String) : Array UInt8 :=
-  let chars := s.toList
-  if chars.length % 2 != 0 then #[]
-  else
-    let rec go (cs : List Char) (acc : Array UInt8) : Array UInt8 :=
-      match cs with
-      | hi :: lo :: rest =>
-        match hexCharToNibble hi, hexCharToNibble lo with
-        | some h, some l => go rest (acc.push (h * 16 + l))
-        | _, _ => #[]
-      | _ => acc
-    go chars #[]
-
-private def toHex (b : UInt8) : String :=
-  let hi := b.toNat / 16
-  let lo := b.toNat % 16
-  let hexChar := fun n => if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-  s!"{hexChar hi}{hexChar lo}"
-
-/-- Encode bytes to lowercase hex string (no 0x prefix). -/
-def bytesToHex (bs : Array UInt8) : String :=
-  bs.foldl (fun acc b => acc ++ toHex b) ""
-
-def baToHex (bs : ByteArray) : String :=
-  bs.foldl (fun acc b => acc ++ toHex b) ""
-
-def hexToBA (s : String) : ByteArray :=
-  let arr := hexToBytes s
-  arr.foldl (fun (ba : ByteArray) b => ba.push b) ByteArray.empty
+open ETHCryptoLean.Utils
 
 -- ═══════════════════════════════════════════════════════════════
 -- Test helpers
@@ -175,15 +135,15 @@ def loadVectors (path : String) : IO (List TestVector) := do
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
+      let input := fromHex v.input
       let output := Keccak.keccak256 input
-      let ok := bytesToHex output == v.expected
+      let ok := toHex output == v.expected
       stats := stats.add ok
       if ok then IO.println s!"  PASS  {v.name}"
       else
         IO.println s!"  FAIL  {v.name}"
         IO.println s!"         expected: {v.expected}"
-        IO.println s!"         got:      {bytesToHex output}"
+        IO.println s!"         got:      {toHex output}"
     IO.println s!"  keccak256: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
@@ -274,15 +234,15 @@ def loadVectors (path : String) : IO (List TestVector) := do
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
+      let input := fromHex v.input
       let output := SHA256.hash input
-      let ok := bytesToHex output == v.expected
+      let ok := toHex output == v.expected
       stats := stats.add ok
       if ok then IO.println s!"  PASS  {v.name}"
       else
         IO.println s!"  FAIL  {v.name}"
         IO.println s!"         expected: {v.expected}"
-        IO.println s!"         got:      {bytesToHex output}"
+        IO.println s!"         got:      {toHex output}"
     IO.println s!"  sha256: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
@@ -349,15 +309,15 @@ open ETHCryptoLean.RIPEMD160 in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
+      let input := fromHex v.input
       let output := ripemd160 input
-      let ok := bytesToHex output == v.expected
+      let ok := toHex output == v.expected
       stats := stats.add ok
       if ok then IO.println s!"  PASS  {v.name}"
       else
         IO.println s!"  FAIL  {v.name}"
         IO.println s!"         expected: {v.expected}"
-        IO.println s!"         got:      {bytesToHex output}"
+        IO.println s!"         got:      {toHex output}"
     IO.println s!"  ripemd160: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
@@ -372,7 +332,7 @@ open ETHCryptoLean.RIPEMD160 in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
+      let input := fromHex v.input
       -- ecrecover input: hash(32) + v(32) + r(32) + s(32)
       -- We need to pad input to 128 bytes if shorter
       let padded := if input.size < 128 then
@@ -391,7 +351,7 @@ open ETHCryptoLean.RIPEMD160 in
         else IO.println s!"  FAIL  {v.name} (expected failure but got result)"
       else
         -- Expect success: output is 32 bytes (address left-padded)
-        let expectedBytes := hexToBytes v.expected
+        let expectedBytes := fromHex v.expected
         match result with
         | some addr =>
           let addrBytes := addr.toBytesBE.toArray
@@ -401,7 +361,7 @@ open ETHCryptoLean.RIPEMD160 in
           else
             IO.println s!"  FAIL  {v.name}"
             IO.println s!"         expected: {v.expected}"
-            IO.println s!"         got:      {bytesToHex addrBytes}"
+            IO.println s!"         got:      {toHex addrBytes}"
         | none =>
           stats := stats.add false
           IO.println s!"  FAIL  {v.name} (got none, expected {v.expected})"
@@ -420,9 +380,9 @@ open ETHCryptoLean.BN256 in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
-      let result := ecAddPrecompile (hexToBA v.input)
-      let expectedBytes := hexToBA v.expected
+      let input := fromHex v.input
+      let result := ecAddPrecompile (fromHexBA v.input)
+      let expectedBytes := fromHexBA v.expected
       match result with
       | some output =>
         let ok := output == expectedBytes
@@ -454,9 +414,9 @@ open ETHCryptoLean.BN256 in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
-      let result := ecMulPrecompile (hexToBA v.input)
-      let expectedBytes := hexToBA v.expected
+      let input := fromHex v.input
+      let result := ecMulPrecompile (fromHexBA v.input)
+      let expectedBytes := fromHexBA v.expected
       match result with
       | some output =>
         let ok := output == expectedBytes
@@ -488,9 +448,9 @@ open ETHCryptoLean.BN256 in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
-      let result := ecPairingPrecompile (hexToBA v.input)
-      let expectedBytes := hexToBA v.expected
+      let input := fromHex v.input
+      let result := ecPairingPrecompile (fromHexBA v.input)
+      let expectedBytes := fromHexBA v.expected
       match result with
       | some output =>
         let ok := output == expectedBytes
@@ -524,8 +484,8 @@ open ETHCryptoLean.Blake2f in
   else
     let mut stats : TestStats := {}
     for v in allVectors do
-      let input := hexToBytes v.input
-      let result := blake2fPrecompile (hexToBA v.input)
+      let input := fromHex v.input
+      let result := blake2fPrecompile (fromHexBA v.input)
       if v.expected == "" then
         -- Expect failure
         let ok := result.isNone
@@ -533,7 +493,7 @@ open ETHCryptoLean.Blake2f in
         if ok then IO.println s!"  PASS  {v.name} (expected failure)"
         else IO.println s!"  FAIL  {v.name} (expected failure but got result)"
       else
-        let expectedBytes := hexToBA v.expected
+        let expectedBytes := fromHexBA v.expected
         match result with
         | some output =>
           let ok := output == expectedBytes
@@ -561,16 +521,16 @@ open ETHCryptoLean.ModExp in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
+      let input := fromHex v.input
       let result := modExpPrecompile input
-      let expectedBytes := hexToBytes v.expected
+      let expectedBytes := fromHex v.expected
       let ok := result == expectedBytes
       stats := stats.add ok
       if ok then IO.println s!"  PASS  {v.name}"
       else
         IO.println s!"  FAIL  {v.name}"
         IO.println s!"         expected: {v.expected}"
-        IO.println s!"         got:      {bytesToHex result}"
+        IO.println s!"         got:      {toHex result}"
     IO.println s!"  modexp: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
@@ -586,16 +546,16 @@ open ETHCryptoLean.ModExp in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
+      let input := fromHex v.input
       let result := modExpPrecompile input
-      let expectedBytes := hexToBytes v.expected
+      let expectedBytes := fromHex v.expected
       let ok := result == expectedBytes
       stats := stats.add ok
       if ok then IO.println s!"  PASS  {v.name}"
       else
         IO.println s!"  FAIL  {v.name}"
         IO.println s!"         expected: {v.expected}"
-        IO.println s!"         got:      {bytesToHex result}"
+        IO.println s!"         got:      {toHex result}"
     IO.println s!"  modexp_eip2565: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
@@ -611,14 +571,14 @@ open ETHCryptoLean.ModExp in
   else
     let mut stats : TestStats := {}
     for v in vectors do
-      let input := hexToBytes v.input
+      let input := fromHex v.input
       let result := modExpPrecompile input
-      let expectedBytes := hexToBytes v.expected
+      let expectedBytes := fromHex v.expected
       let ok := result == expectedBytes
       stats := stats.add ok
       if ok then IO.println s!"  PASS  {v.name}"
       else
         IO.println s!"  FAIL  {v.name}"
         IO.println s!"         expected: {v.expected}"
-        IO.println s!"         got:      {bytesToHex result}"
+        IO.println s!"         got:      {toHex result}"
     IO.println s!"  modexp_eip7883: {stats.passed}/{stats.passed + stats.failed} passed"

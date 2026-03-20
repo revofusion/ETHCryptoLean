@@ -1,3 +1,7 @@
+import ETHCryptoLean.Utils
+
+open ETHCryptoLean.Utils
+
 namespace SHA256
 
 -- SHA-256 constants: first 32 bits of the fractional parts of the cube roots of the first 64 primes
@@ -38,15 +42,6 @@ private def h0Init : Array UInt32 := #[
 
 @[inline] private def smallSigma1 (x : UInt32) : UInt32 :=
   rotr x 17 ^^^ rotr x 19 ^^^ (x >>> 10)
-
-/-- Read a big-endian UInt32 from 4 bytes starting at index `i`. -/
-@[inline] private def readBE32 (data : Array UInt8) (i : Nat) : UInt32 :=
-  (data[i]!.toUInt32 <<< 24) ||| (data[i+1]!.toUInt32 <<< 16) |||
-  (data[i+2]!.toUInt32 <<< 8) ||| data[i+3]!.toUInt32
-
-/-- Write a big-endian UInt32 to 4 bytes. -/
-@[inline] private def writeBE32 (v : UInt32) : Array UInt8 :=
-  #[(v >>> 24).toUInt8, (v >>> 16).toUInt8, (v >>> 8).toUInt8, v.toUInt8]
 
 /-- Process a single 64-byte block and return updated hash state. -/
 private def processBlock (h : Array UInt32) (block : Array UInt8) : Array UInt32 :=
@@ -130,16 +125,5 @@ partial def hash (msg : Array UInt8) : Array UInt8 :=
     for i in [:8] do
       result := result ++ writeBE32 finalH[i]!
     return result
-
-/-- Convert a byte array to a hex string. -/
-private def hexDigit (n : Nat) : Char :=
-  if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-
-def toHex (bytes : Array UInt8) : String :=
-  bytes.foldl (fun acc b =>
-    let hi := (b.toNat >>> 4) &&& 0x0F
-    let lo := b.toNat &&& 0x0F
-    acc ++ String.ofList [hexDigit hi, hexDigit lo]
-  ) ""
 
 end SHA256
