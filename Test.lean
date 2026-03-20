@@ -1,10 +1,36 @@
 /-
   Test suite for ETHCryptoLean.
-  Validates all cryptographic primitives against known test vectors.
+  Validates cryptographic primitives against known test vectors
+  and official Ethereum JSON test vectors from vectors/.
 -/
 import ETHCryptoLean
+import Lean.Data.Json
 
 open Secp256k1
+
+-- ═══════════════════════════════════════════════════════════════
+-- Hex utilities
+-- ═══════════════════════════════════════════════════════════════
+
+private def hexCharToNibble (c : Char) : Option UInt8 :=
+  if '0' ≤ c && c ≤ '9' then some (c.toNat - '0'.toNat).toUInt8
+  else if 'a' ≤ c && c ≤ 'f' then some (c.toNat - 'a'.toNat + 10).toUInt8
+  else if 'A' ≤ c && c ≤ 'F' then some (c.toNat - 'A'.toNat + 10).toUInt8
+  else none
+
+/-- Decode a hex string (no 0x prefix) to bytes. Returns empty on invalid input. -/
+def hexToBytes (s : String) : Array UInt8 :=
+  let chars := s.toList
+  if chars.length % 2 != 0 then #[]
+  else
+    let rec go (cs : List Char) (acc : Array UInt8) : Array UInt8 :=
+      match cs with
+      | hi :: lo :: rest =>
+        match hexCharToNibble hi, hexCharToNibble lo with
+        | some h, some l => go rest (acc.push (h * 16 + l))
+        | _, _ => #[]
+      | _ => acc
+    go chars #[]
 
 private def toHex (b : UInt8) : String :=
   let hi := b.toNat / 16
@@ -12,15 +38,64 @@ private def toHex (b : UInt8) : String :=
   let hexChar := fun n => if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
   s!"{hexChar hi}{hexChar lo}"
 
-private def bytesToHex (bs : Array UInt8) : String :=
+/-- Encode bytes to lowercase hex string (no 0x prefix). -/
+def bytesToHex (bs : Array UInt8) : String :=
   bs.foldl (fun acc b => acc ++ toHex b) ""
+
+-- ═══════════════════════════════════════════════════════════════
+-- Test helpers
+-- ═══════════════════════════════════════════════════════════════
 
 private def assert (name : String) (cond : Bool) : IO Unit :=
   if cond then IO.println s!"  PASS  {name}"
   else IO.println s!"  FAIL  {name}"
 
+structure TestStats where
+  passed : Nat := 0
+  failed : Nat := 0
+
+def TestStats.add (s : TestStats) (ok : Bool) : TestStats :=
+  if ok then { s with passed := s.passed + 1 }
+  else { s with failed := s.failed + 1 }
+
 -- ═══════════════════════════════════════════════════════════════
--- UInt256 tests
+-- JSON test vector parsing
+-- ═══════════════════════════════════════════════════════════════
+
+structure TestVector where
+  name : String
+  input : String
+  expected : String
+
+/-- Parse a JSON array of test vector objects. -/
+def parseTestVectors (json : Lean.Json) : List TestVector :=
+  match json with
+  | .arr items =>
+    items.toList.filterMap fun item => do
+      let name ← (item.getObjValAs? String "Name").toOption
+      let input ← (item.getObjValAs? String "Input").toOption
+      -- Success cases have "Expected", fail cases have "ExpectedError"
+      let expected := match (item.getObjValAs? String "Expected").toOption with
+        | some e => e
+        | none => ""  -- failure cases
+      pure ⟨name, input, expected⟩
+  | _ => []
+
+/-- Read and parse a JSON test vector file. Returns empty list on error. -/
+def loadVectors (path : String) : IO (List TestVector) := do
+  try
+    let content ← IO.FS.readFile path
+    match Lean.Json.parse content with
+    | .ok json => pure (parseTestVectors json)
+    | .error e =>
+      IO.eprintln s!"  WARNING: Failed to parse {path}: {e}"
+      pure []
+  catch e =>
+    IO.eprintln s!"  WARNING: Failed to read {path}: {e}"
+    pure []
+
+-- ═══════════════════════════════════════════════════════════════
+-- UInt256 tests (inline, no JSON vectors)
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
@@ -83,7 +158,7 @@ private def assert (name : String) (cond : Bool) : IO Unit :=
   assert "large value roundtrip" ((UInt256.fromBytesBE large.toBytesBE) == large)
 
 -- ═══════════════════════════════════════════════════════════════
--- Keccak-256 test vectors
+-- Keccak-256 test vectors (inline)
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
@@ -131,7 +206,7 @@ private def assert (name : String) (cond : Bool) : IO Unit :=
   assert "different inputs differ" (h1 != h2)
 
 -- ═══════════════════════════════════════════════════════════════
--- secp256k1 curve tests
+-- secp256k1 curve tests (inline)
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
@@ -179,7 +254,7 @@ private def assert (name : String) (cond : Bool) : IO Unit :=
   | none => assert "Y recovery should succeed" false
 
 -- ═══════════════════════════════════════════════════════════════
--- n*G = infinity (curve order, slow test)
+-- n*G = infinity (curve order)
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
@@ -188,65 +263,7 @@ private def assert (name : String) (cond : Bool) : IO Unit :=
   assert "n*G == infinity" (nG == Point.infinity)
 
 -- ═══════════════════════════════════════════════════════════════
--- ecrecover test vectors
--- ═══════════════════════════════════════════════════════════════
-
-#eval do
-  IO.println "\necrecover"
-
-  -- Known test vector from Ethereum
-  let hash := UInt256.ofNat 0x456e9aea5e197a1f1af7a3e85a3212fa4049a3ba34c2289b4c860fc0b0c64ef3
-  let v := UInt256.ofNat 28
-  let r := UInt256.ofNat 0x9242685bf161793cc25603c231bc2f568eb630ea16aa137d2664ac8038825608
-  let s := UInt256.ofNat 0x4f8ae3bd7535248d0bd448298cc2e2071e56992d0774dc340c368ae950852ada
-  match ecrecover hash v r s with
-  | some addr =>
-    assert "known test vector recovers" true
-    IO.println s!"         recovered: {addr}"
-  | none => assert "known test vector recovers" false
-
-  -- v=27 should also work (different recovery id)
-  let hash := UInt256.ofNat 0x456e9aea5e197a1f1af7a3e85a3212fa4049a3ba34c2289b4c860fc0b0c64ef3
-  let v27 := UInt256.ofNat 27
-  match ecrecover hash v27 r s with
-  | some addr =>
-    -- v=27 and v=28 should recover different addresses
-    let v28addr := ecrecover hash (UInt256.ofNat 28) r s
-    match v28addr with
-    | some a28 => assert "v=27 and v=28 give different addresses" (addr != a28)
-    | none => assert "v=28 should also recover" false
-  | none =>
-    -- v=27 may fail for this particular r,s if the y-parity doesn't work
-    assert "v=27 fails gracefully" true
-
-  -- Invalid v values
-  assert "v=0 rejected" (ecrecover hash (UInt256.ofNat 0) r s == none)
-  assert "v=1 rejected" (ecrecover hash (UInt256.ofNat 1) r s == none)
-  assert "v=26 rejected" (ecrecover hash (UInt256.ofNat 26) r s == none)
-  assert "v=29 rejected" (ecrecover hash (UInt256.ofNat 29) r s == none)
-  assert "v=255 rejected" (ecrecover hash (UInt256.ofNat 255) r s == none)
-
-  -- r=0 rejected
-  assert "r=0 rejected" (ecrecover hash (UInt256.ofNat 27) (UInt256.ofNat 0) s == none)
-
-  -- s=0 rejected
-  assert "s=0 rejected" (ecrecover hash (UInt256.ofNat 27) r (UInt256.ofNat 0) == none)
-
-  -- r >= n rejected (out of range)
-  let rTooBig := UInt256.ofNat Secp256k1.n
-  assert "r=n rejected" (ecrecover hash (UInt256.ofNat 27) rTooBig s == none)
-
-  -- s >= n rejected
-  let sTooBig := UInt256.ofNat Secp256k1.n
-  assert "s=n rejected" (ecrecover hash (UInt256.ofNat 27) r sTooBig == none)
-
-  -- hash=0 should still work (edge case, not invalid)
-  match ecrecover (UInt256.ofNat 0) (UInt256.ofNat 28) r s with
-  | some _ => assert "hash=0 recovers" true
-  | none => assert "hash=0 recovers" true  -- may fail depending on r,s
-
--- ═══════════════════════════════════════════════════════════════
--- UInt256 keccak256 integration
+-- UInt256 keccak256 integration (inline)
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
@@ -266,7 +283,7 @@ private def assert (name : String) (cond : Bool) : IO Unit :=
   assert "zero-slot hash nonzero" (zeroHash.toNat != 0)
 
 -- ═══════════════════════════════════════════════════════════════
--- SHA-256 test vectors (NIST)
+-- SHA-256 test vectors (inline, no JSON vectors)
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
@@ -302,7 +319,7 @@ private def assert (name : String) (cond : Bool) : IO Unit :=
   assert "sha256 != keccak256" (sha != kec)
 
 -- ═══════════════════════════════════════════════════════════════
--- BLS12-381 curve tests
+-- BLS12-381 curve tests (inline)
 -- ═══════════════════════════════════════════════════════════════
 
 open BLS12381 in
@@ -354,7 +371,7 @@ open BLS12381 in
   assert "Fp2 mul c1" (prod.c1 == 10)
 
 -- ═══════════════════════════════════════════════════════════════
--- RIPEMD-160 test vectors
+-- RIPEMD-160 test vectors (inline, no JSON vectors)
 -- ═══════════════════════════════════════════════════════════════
 
 open ETHCryptoLean.RIPEMD160 in
@@ -373,54 +390,264 @@ open ETHCryptoLean.RIPEMD160 in
   assert "output length" ((ripemd160 #[]).size == 20)
 
 -- ═══════════════════════════════════════════════════════════════
--- ModExp test vectors
+-- ecRecover - JSON test vectors
 -- ═══════════════════════════════════════════════════════════════
 
-open ETHCryptoLean.ModExp in
 #eval do
-  IO.println "\nModExp"
-
-  assert "2^10 mod 1000 = 24" (modExp 2 10 1000 == 24)
-  assert "3^0 mod 7 = 1" (modExp 3 0 7 == 1)
-  assert "x mod 1 = 0" (modExp 123 456 1 == 0)
-  assert "x mod 0 = 0" (modExp 2 10 0 == 0)
-  assert "2^256 mod (2^256-1) = 1" (modExp 2 256 (2^256 - 1) == 1)
-  assert "7^3 mod 13 = 5" (modExp 7 3 13 == 5)
-  assert "2^16 mod 65537 = 1" (modExp 2 16 65537 == 1)
+  IO.println "\necRecover (JSON vectors)"
+  let vectors ← loadVectors "vectors/ecRecover.json"
+  if vectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      -- ecrecover input: hash(32) + v(32) + r(32) + s(32)
+      -- We need to pad input to 128 bytes if shorter
+      let padded := if input.size < 128 then
+        input ++ (List.replicate (128 - input.size) (0 : UInt8)).toArray
+      else input
+      let hash := UInt256.fromBytesBE (padded.extract 0 32).toList
+      let vVal := UInt256.fromBytesBE (padded.extract 32 64).toList
+      let r := UInt256.fromBytesBE (padded.extract 64 96).toList
+      let s := UInt256.fromBytesBE (padded.extract 96 128).toList
+      let result := ecrecover hash vVal r s
+      if v.expected == "" then
+        -- Expect failure
+        let ok := result.isNone
+        stats := stats.add ok
+        if ok then IO.println s!"  PASS  {v.name} (expected failure)"
+        else IO.println s!"  FAIL  {v.name} (expected failure but got result)"
+      else
+        -- Expect success: output is 32 bytes (address left-padded)
+        let expectedBytes := hexToBytes v.expected
+        match result with
+        | some addr =>
+          let addrBytes := addr.toBytesBE.toArray
+          let ok := addrBytes == expectedBytes
+          stats := stats.add ok
+          if ok then IO.println s!"  PASS  {v.name}"
+          else
+            IO.println s!"  FAIL  {v.name}"
+            IO.println s!"         expected: {v.expected}"
+            IO.println s!"         got:      {bytesToHex addrBytes}"
+        | none =>
+          stats := stats.add false
+          IO.println s!"  FAIL  {v.name} (got none, expected {v.expected})"
+    IO.println s!"  ecRecover: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
--- BLAKE2f test vectors
--- ═══════════════════════════════════════════════════════════════
-
-open ETHCryptoLean.Blake2f in
-#eval do
-  IO.println "\nBLAKE2f"
-
-  let h : Array UInt64 := #[0, 0, 0, 0, 0, 0, 0, 0]
-  let m : Array UInt64 := #[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let result := blake2Compress 0 h m 0 0 false
-  assert "0-round output size" (result.size == 8)
-
-  let result1 := blake2Compress 1 h m 0 0 false
-  assert "1-round output size" (result1.size == 8)
-  assert "1-round differs from 0-round" (result1 != result)
-
-  -- Invalid precompile input (wrong length)
-  assert "precompile rejects wrong length" (blake2FPrecompile #[0] == none)
-
--- ═══════════════════════════════════════════════════════════════
--- BN256/alt_bn128 test vectors
+-- BN256 ecAdd - JSON test vectors
 -- ═══════════════════════════════════════════════════════════════
 
 open ETHCryptoLean.BN256 in
 #eval do
-  IO.println "\nBN256/alt_bn128"
+  IO.println "\nbn256Add (JSON vectors)"
+  let vectors ← loadVectors "vectors/bn256Add.json"
+  if vectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let result := ecAddPrecompile input
+      let expectedBytes := hexToBytes v.expected
+      match result with
+      | some output =>
+        let ok := output == expectedBytes
+        stats := stats.add ok
+        if ok then IO.println s!"  PASS  {v.name}"
+        else
+          IO.println s!"  FAIL  {v.name}"
+          IO.println s!"         expected: {v.expected}"
+          IO.println s!"         got:      {bytesToHex output}"
+      | none =>
+        if v.expected == "" then
+          stats := stats.add true
+          IO.println s!"  PASS  {v.name} (expected failure)"
+        else
+          stats := stats.add false
+          IO.println s!"  FAIL  {v.name} (got none, expected {v.expected})"
+    IO.println s!"  bn256Add: {stats.passed}/{stats.passed + stats.failed} passed"
 
-  assert "G1 generator on curve" (g1OnCurve g1Gen)
-  assert "G1 infinity on curve" (g1OnCurve G1Point.infinity)
-  assert "G1: P + O = P" (g1Add g1Gen G1Point.infinity == g1Gen)
-  assert "G1: O + P = P" (g1Add G1Point.infinity g1Gen == g1Gen)
-  assert "G1: P + (-P) = O" (g1Add g1Gen (g1Neg g1Gen) == G1Point.infinity)
-  assert "ecAdd identity left" (ecAdd 0 0 1 2 == some (1, 2))
-  assert "ecAdd identity right" (ecAdd 1 2 0 0 == some (1, 2))
-  assert "2*G on curve" (g1OnCurve (g1Mul g1Gen 2))
+-- ═══════════════════════════════════════════════════════════════
+-- BN256 ecMul - JSON test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.BN256 in
+#eval do
+  IO.println "\nbn256ScalarMul (JSON vectors)"
+  let vectors ← loadVectors "vectors/bn256ScalarMul.json"
+  if vectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let result := ecMulPrecompile input
+      let expectedBytes := hexToBytes v.expected
+      match result with
+      | some output =>
+        let ok := output == expectedBytes
+        stats := stats.add ok
+        if ok then IO.println s!"  PASS  {v.name}"
+        else
+          IO.println s!"  FAIL  {v.name}"
+          IO.println s!"         expected: {v.expected}"
+          IO.println s!"         got:      {bytesToHex output}"
+      | none =>
+        if v.expected == "" then
+          stats := stats.add true
+          IO.println s!"  PASS  {v.name} (expected failure)"
+        else
+          stats := stats.add false
+          IO.println s!"  FAIL  {v.name} (got none, expected {v.expected})"
+    IO.println s!"  bn256ScalarMul: {stats.passed}/{stats.passed + stats.failed} passed"
+
+-- ═══════════════════════════════════════════════════════════════
+-- BN256 ecPairing - JSON test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.BN256 in
+#eval do
+  IO.println "\nbn256Pairing (JSON vectors)"
+  let vectors ← loadVectors "vectors/bn256Pairing.json"
+  if vectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let result := ecPairingPrecompile input
+      let expectedBytes := hexToBytes v.expected
+      match result with
+      | some output =>
+        let ok := output == expectedBytes
+        stats := stats.add ok
+        if ok then IO.println s!"  PASS  {v.name}"
+        else
+          IO.println s!"  FAIL  {v.name}"
+          IO.println s!"         expected: {v.expected}"
+          IO.println s!"         got:      {bytesToHex output}"
+      | none =>
+        if v.expected == "" then
+          stats := stats.add true
+          IO.println s!"  PASS  {v.name} (expected failure)"
+        else
+          stats := stats.add false
+          IO.println s!"  FAIL  {v.name} (got none, expected {v.expected})"
+    IO.println s!"  bn256Pairing: {stats.passed}/{stats.passed + stats.failed} passed"
+
+-- ═══════════════════════════════════════════════════════════════
+-- BLAKE2f - JSON test vectors (success + failure)
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.Blake2f in
+#eval do
+  IO.println "\nblake2F (JSON vectors)"
+  let vectors ← loadVectors "vectors/blake2F.json"
+  let failVectors ← loadVectors "vectors/fail-blake2f.json"
+  let allVectors := vectors ++ failVectors
+  if allVectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in allVectors do
+      let input := hexToBytes v.input
+      let result := blake2FPrecompile input
+      if v.expected == "" then
+        -- Expect failure
+        let ok := result.isNone
+        stats := stats.add ok
+        if ok then IO.println s!"  PASS  {v.name} (expected failure)"
+        else IO.println s!"  FAIL  {v.name} (expected failure but got result)"
+      else
+        let expectedBytes := hexToBytes v.expected
+        match result with
+        | some output =>
+          let ok := output == expectedBytes
+          stats := stats.add ok
+          if ok then IO.println s!"  PASS  {v.name}"
+          else
+            IO.println s!"  FAIL  {v.name}"
+            IO.println s!"         expected: {v.expected}"
+            IO.println s!"         got:      {bytesToHex output}"
+        | none =>
+          stats := stats.add false
+          IO.println s!"  FAIL  {v.name} (got none, expected output)"
+    IO.println s!"  blake2F: {stats.passed}/{stats.passed + stats.failed} passed"
+
+-- ═══════════════════════════════════════════════════════════════
+-- ModExp - JSON test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.ModExp in
+#eval do
+  IO.println "\nmodexp (JSON vectors)"
+  let vectors ← loadVectors "vectors/modexp.json"
+  if vectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let result := modExpPrecompile input
+      let expectedBytes := hexToBytes v.expected
+      let ok := result == expectedBytes
+      stats := stats.add ok
+      if ok then IO.println s!"  PASS  {v.name}"
+      else
+        IO.println s!"  FAIL  {v.name}"
+        IO.println s!"         expected: {v.expected}"
+        IO.println s!"         got:      {bytesToHex result}"
+    IO.println s!"  modexp: {stats.passed}/{stats.passed + stats.failed} passed"
+
+-- ═══════════════════════════════════════════════════════════════
+-- ModExp EIP-2565 - JSON test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.ModExp in
+#eval do
+  IO.println "\nmodexp EIP-2565 (JSON vectors)"
+  let vectors ← loadVectors "vectors/modexp_eip2565.json"
+  if vectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let result := modExpPrecompile input
+      let expectedBytes := hexToBytes v.expected
+      let ok := result == expectedBytes
+      stats := stats.add ok
+      if ok then IO.println s!"  PASS  {v.name}"
+      else
+        IO.println s!"  FAIL  {v.name}"
+        IO.println s!"         expected: {v.expected}"
+        IO.println s!"         got:      {bytesToHex result}"
+    IO.println s!"  modexp_eip2565: {stats.passed}/{stats.passed + stats.failed} passed"
+
+-- ═══════════════════════════════════════════════════════════════
+-- ModExp EIP-7883 - JSON test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.ModExp in
+#eval do
+  IO.println "\nmodexp EIP-7883 (JSON vectors)"
+  let vectors ← loadVectors "vectors/modexp_eip7883.json"
+  if vectors.isEmpty then
+    IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let result := modExpPrecompile input
+      let expectedBytes := hexToBytes v.expected
+      let ok := result == expectedBytes
+      stats := stats.add ok
+      if ok then IO.println s!"  PASS  {v.name}"
+      else
+        IO.println s!"  FAIL  {v.name}"
+        IO.println s!"         expected: {v.expected}"
+        IO.println s!"         got:      {bytesToHex result}"
+    IO.println s!"  modexp_eip7883: {stats.passed}/{stats.passed + stats.failed} passed"
