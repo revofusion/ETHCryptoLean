@@ -11,9 +11,7 @@ namespace BLS12381
 -- Line functions for Miller loop
 -- ═══════════════════════════════════════════
 
--- Line function evaluation: tangent line at T evaluated at P
--- T is on E(Fp12), P is on E(Fp12)
--- Returns: yP - yT - λ(xP - xT) where λ = 3xT²/(2yT)
+-- Tangent line at T evaluated at P
 private def lineDouble (t : G12Point) (p : G12Point) : Fp12 :=
   match t, p with
   | .affine xt yt, .affine xp yp =>
@@ -22,8 +20,7 @@ private def lineDouble (t : G12Point) (p : G12Point) : Fp12 :=
     fp12Sub yp (fp12Add yt (fp12Mul lam (fp12Sub xp xt)))
   | _, _ => fp12One
 
--- Line function evaluation: line through T and Q evaluated at P
--- Returns: yP - yT - λ(xP - xT) where λ = (yQ - yT)/(xQ - xT)
+-- Line through T and Q evaluated at P
 private def lineAdd (t q : G12Point) (p : G12Point) : Fp12 :=
   match t, q, p with
   | .affine xt yt, .affine xq yq, .affine xp yp =>
@@ -46,7 +43,6 @@ partial def toBitsMSB (n : Nat) : List Bool :=
   else toBitsMSB (n / 2) ++ [n % 2 == 1]
 
 -- Miller loop for f_{|x|, Q}(P)
--- Iterates over bits of |x| from second-MSB to LSB
 partial def millerLoop (p12 q12 : G12Point) : Fp12 :=
   match p12, q12 with
   | .infinity, _ => fp12One
@@ -79,49 +75,15 @@ partial def millerLoop (p12 q12 : G12Point) : Fp12 :=
 -- Final exponentiation
 -- ═══════════════════════════════════════════
 
--- Final exponentiation: f^((p^12 - 1) / r)
--- Decomposed as:
---   (p^12 - 1) / r = (p^6 - 1) · (p^2 + 1) · ((p^4 - p^2 + 1) / r)
-
--- Easy part step 1: f^(p^6 - 1)
--- f^(p^6) = conjugate(f), so f^(p^6-1) = conj(f) / f
+-- Easy part: f^(p^6 - 1)
 private def easyPart1 (f : Fp12) : Fp12 :=
   fp12Mul (fp12Conj f) (fp12Inv f)
 
--- Easy part step 2: f^(p^2 + 1)
--- We compute f^(p^2) using Frobenius and multiply by f
--- For now, use naive exponentiation for f^(p^2)
--- f^(p^2+1) = f^(p^2) · f
--- Since after easy part 1 we have an element of order dividing p^6+1,
--- f^(p^2) can be computed via the Frobenius p^2 map.
--- For a generic implementation, we use:
---   f^(p²) via fp12Pow
--- But p² is huge. Instead, note that after easyPart1, the element
--- is in the p^6+1 torsion. We can compute the Frobenius.
---
--- For simplicity and correctness, we just compute the full exponent.
-
--- Frobenius endomorphism on Fp2: σ(a + bu) = a - bu (conjugation)
--- This is already fp2Conj
-
--- Frobenius constants for Fp6 and Fp12
--- These are ξ^((p-1)/3), ξ^(2(p-1)/3), etc.
--- We compute them on the fly using fp2Pow.
-
--- Frobenius on Fp6: given a = a0 + a1·v + a2·v²
--- σ(a) = σ(a0) + σ(a1)·v^p + σ(a2)·v^(2p)
--- v^p = v · ξ^((p-1)/3), v^(2p) = v² · ξ^(2(p-1)/3)
--- So σ(a) = conj(a0) + conj(a1)·γ₁·v + conj(a2)·γ₂·v²
--- where γ₁ = ξ^((p-1)/3), γ₂ = ξ^(2(p-1)/3)
-
+-- Frobenius constants: γ₁ = ξ^((p-1)/3), γ₂ = ξ^(2(p-1)/3)
 private def GAMMA_1_1 : Fp2 := fp2Pow XI ((P - 1) / 3)
 private def GAMMA_1_2 : Fp2 := fp2Pow XI (2 * (P - 1) / 3)
 
--- v^((p-1)/2) needed for Frobenius on Fp12
--- v^p = γ₁ · v, so v^((p-1)/2) = ?
--- w^p = w · (v^((p-1)/2))... hmm
--- Actually w² = v, so w^p = w · (w²)^((p-1)/2) = w · v^((p-1)/2)
--- v^((p-1)/2) = (v³)^((p-1)/6) = ξ^((p-1)/6)
+-- Frobenius on Fp12: γ_w = ξ^((p-1)/6)
 private def GAMMA_W : Fp2 := fp2Pow XI ((P - 1) / 6)
 
 private def fp6Frobenius (a : Fp6) : Fp6 :=
@@ -133,15 +95,12 @@ private def fp12Frobenius (a : Fp12) : Fp12 :=
   ⟨fp6Frobenius a.c0,
    fp6MulScalar (fp6Frobenius a.c1) GAMMA_W⟩
 
--- Frobenius^2 on Fp2: identity (p²-Frobenius fixes Fp2)
--- Frobenius^2 on Fp6:
--- v^(p²) = v · ξ^((p²-1)/3)
+-- Frobenius^2 constants
 private def GAMMA_2_1 : Fp2 := fp2Pow XI ((P * P - 1) / 3)
 private def GAMMA_2_2 : Fp2 := fp2Pow XI (2 * (P * P - 1) / 3)
 private def GAMMA_2_W : Fp2 := fp2Pow XI ((P * P - 1) / 6)
 
 private def fp6Frobenius2 (a : Fp6) : Fp6 :=
-  -- p²-Frobenius fixes Fp2, so no conjugation
   ⟨a.c0,
    fp2Mul a.c1 GAMMA_2_1,
    fp2Mul a.c2 GAMMA_2_2⟩
@@ -164,49 +123,15 @@ private def fp12Frobenius3 (a : Fp12) : Fp12 :=
   ⟨fp6Frobenius3 a.c0,
    fp6MulScalar (fp6Frobenius3 a.c1) GAMMA_3_W⟩
 
--- Hard part of final exponentiation
--- Exponent: (p^4 - p^2 + 1) / r
--- Using the BLS12 decomposition from Devegili et al.
--- The exponent can be written as:
---   d = (x-1)² · (x+p) · (x²+p²) / 3 + ... (not exactly)
--- For a correct but possibly slow implementation, we compute:
---   d = (p^4 - p^2 + 1) / r directly and use fp12Pow
--- But that's a ~1269-bit exponent.
---
--- Better approach using the parameterized formula for BLS12:
--- From Algorithm 31 of "Guide to Pairing-Based Cryptography" or
--- Bowe's implementation, the hard part can be computed using:
---   a few exponentiations by |x|, Frobenius maps, and multiplications.
---
--- The formula (following gnark/bls12-381):
--- Let t = f^|x| (exponentiation by the curve parameter)
--- Then the hard part uses specific combinations of f, t, t², Frobenius maps.
---
--- For BLS12 curves, the hard part exponent is:
---   h = (x^3 - x^2 + 1)/r + x^2 · (p - 1) + (x - 1) · p^2 + p^3
--- Wait, that's not right either. Let me use a known correct decomposition.
---
--- From the paper "Faster Hashing to G2" (Budroni & Pintore) and
--- implementations in gnark, the BLS12-381 hard part uses:
---
---   result = f^λ₀ · frob(f)^λ₁ · frob²(f)^λ₂ · frob³(f)^λ₃
--- where λᵢ are specific small(ish) values.
---
--- Actually, the simplest correct approach for BLS12:
--- The hard part exponent (p^4 - p^2 + 1)/r = 1 + (x-1)²·p·(p²+1)/3·r^(-1)...
--- This is getting complicated. Let me just compute the exponent directly.
-
+-- Hard part exponent: (p^4 - p^2 + 1) / r
 private def hardPartExponent : Nat :=
   (P ^ 4 - P ^ 2 + 1) / R
 
 private def finalExponentiation (f : Fp12) : Fp12 :=
   if fp12IsZero f then fp12Zero
   else
-    -- Easy part: f^(p^6-1) then ^(p^2+1)
     let f1 := easyPart1 f
-    -- f^(p^2+1): use Frobenius for f^(p^2), then multiply by f
     let f2 := fp12Mul (fp12Frobenius2 f1) f1
-    -- Hard part: f^((p^4 - p^2 + 1)/r)
     fp12Pow f2 hardPartExponent
 
 -- ═══════════════════════════════════════════
@@ -226,7 +151,6 @@ def atePairing (p1 : G1Point) (q : G2Point) : Fp12 :=
     finalExponentiation f
 
 -- Pairing check: e(P1, Q1) * e(P2, Q2) == 1
--- More efficient: compute both Miller loops and do single final exponentiation
 def pairingCheck (p1 : G1Point) (q1 : G2Point) (p2 : G1Point) (q2 : G2Point) : Bool :=
   let f1 := match p1, q1 with
     | .infinity, _ => fp12One

@@ -1,11 +1,8 @@
 /-
   Test suite for ETHCryptoLean.
-  Validates UInt256, keccak256, secp256k1, and ecrecover against known test vectors.
+  Validates all cryptographic primitives against known test vectors.
 -/
-import ETHCryptoLean.Ecrecover
-import ETHCryptoLean.Secp256k1
-import ETHCryptoLean.Keccak256
-import ETHCryptoLean.UInt256
+import ETHCryptoLean
 
 open Secp256k1
 
@@ -267,3 +264,163 @@ private def assert (name : String) (cond : Bool) : IO Unit :=
   -- Ethereum address(0) hash (32 zero bytes)
   let zeroHash := UInt256.keccak256Bytes (List.replicate 32 (0 : UInt8)).toArray
   assert "zero-slot hash nonzero" (zeroHash.toNat != 0)
+
+-- ═══════════════════════════════════════════════════════════════
+-- SHA-256 test vectors (NIST)
+-- ═══════════════════════════════════════════════════════════════
+
+#eval do
+  IO.println "\nSHA-256"
+
+  -- Empty string
+  let hash := SHA256.hash #[]
+  let hex := bytesToHex hash
+  assert "sha256(\"\")" (hex == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+  -- "abc"
+  let hash := SHA256.hash "abc".toUTF8.data
+  let hex := bytesToHex hash
+  assert "sha256(\"abc\")" (hex == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+
+  -- "hello"
+  let hash := SHA256.hash "hello".toUTF8.data
+  let hex := bytesToHex hash
+  assert "sha256(\"hello\")" (hex == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+
+  -- Output is always 32 bytes
+  assert "output length (empty)" ((SHA256.hash #[]).size == 32)
+  assert "output length (1 byte)" ((SHA256.hash #[0x42]).size == 32)
+
+  -- Deterministic
+  let h1 := SHA256.hash "test".toUTF8.data
+  let h2 := SHA256.hash "test".toUTF8.data
+  assert "deterministic" (h1 == h2)
+
+  -- Different from keccak
+  let sha := bytesToHex (SHA256.hash "abc".toUTF8.data)
+  let kec := bytesToHex (Keccak.keccak256 "abc".toUTF8.data)
+  assert "sha256 != keccak256" (sha != kec)
+
+-- ═══════════════════════════════════════════════════════════════
+-- BLS12-381 curve tests
+-- ═══════════════════════════════════════════════════════════════
+
+open BLS12381 in
+#eval do
+  IO.println "\nBLS12-381"
+
+  -- G1 generator is on the curve
+  assert "G1 generator on curve" (g1IsOnCurve G1_GEN)
+
+  -- G2 generator is on the curve
+  assert "G2 generator on curve" (g2IsOnCurve G2_GEN)
+
+  -- G1 point at infinity is on the curve
+  assert "G1 infinity on curve" (g1IsOnCurve .infinity)
+
+  -- G2 point at infinity is on the curve
+  assert "G2 infinity on curve" (g2IsOnCurve .infinity)
+
+  -- G1: point + infinity = point
+  assert "G1: P + O = P" (g1Add G1_GEN .infinity == G1_GEN)
+  assert "G1: O + P = P" (g1Add .infinity G1_GEN == G1_GEN)
+
+  -- G1: 1*G = G
+  assert "G1: 1*G = G" (g1ScalarMul 1 G1_GEN == G1_GEN)
+
+  -- G1: 2*G is on the curve
+  let twoG := g1ScalarMul 2 G1_GEN
+  assert "G1: 2*G on curve" (g1IsOnCurve twoG)
+
+  -- G1: G + G = 2*G
+  assert "G1: G + G = 2*G" (g1Add G1_GEN G1_GEN == twoG)
+
+  -- G1: 3*G is on the curve
+  assert "G1: 3*G on curve" (g1IsOnCurve (g1ScalarMul 3 G1_GEN))
+
+  -- G1: 2*G + G = 3*G
+  assert "G1: 2G + G = 3G" (g1Add twoG G1_GEN == g1ScalarMul 3 G1_GEN)
+
+  -- Fp2 arithmetic basics
+  let a : Fp2 := ⟨3, 4⟩
+  let b : Fp2 := ⟨1, 2⟩
+  let sum := fp2Add a b
+  assert "Fp2 add" (sum.c0 == 4 && sum.c1 == 6)
+
+  -- Fp2 multiplication: (3+4i)(1+2i) = 3+6i+4i+8i² = 3+10i-8 = -5+10i
+  let prod := fp2Mul a b
+  let expected_c0 := (BLS12381.P - 5) % BLS12381.P
+  assert "Fp2 mul c0" (prod.c0 == expected_c0)
+  assert "Fp2 mul c1" (prod.c1 == 10)
+
+-- ═══════════════════════════════════════════════════════════════
+-- RIPEMD-160 test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.RIPEMD160 in
+#eval do
+  IO.println "\nRIPEMD-160"
+
+  let hash := ripemd160 #[]
+  assert "ripemd160(\"\")" (bytesToHex hash == "9c1185a5c5e9fc54612808977ee8f548b2258d31")
+
+  let hash := ripemd160 #[0x61]
+  assert "ripemd160(\"a\")" (bytesToHex hash == "0bdc9d2d256b3ee9daae347be6f4dc835a467ffe")
+
+  let hash := ripemd160 #[0x61, 0x62, 0x63]
+  assert "ripemd160(\"abc\")" (bytesToHex hash == "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc")
+
+  assert "output length" ((ripemd160 #[]).size == 20)
+
+-- ═══════════════════════════════════════════════════════════════
+-- ModExp test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.ModExp in
+#eval do
+  IO.println "\nModExp"
+
+  assert "2^10 mod 1000 = 24" (modExp 2 10 1000 == 24)
+  assert "3^0 mod 7 = 1" (modExp 3 0 7 == 1)
+  assert "x mod 1 = 0" (modExp 123 456 1 == 0)
+  assert "x mod 0 = 0" (modExp 2 10 0 == 0)
+  assert "2^256 mod (2^256-1) = 1" (modExp 2 256 (2^256 - 1) == 1)
+  assert "7^3 mod 13 = 5" (modExp 7 3 13 == 5)
+  assert "2^16 mod 65537 = 1" (modExp 2 16 65537 == 1)
+
+-- ═══════════════════════════════════════════════════════════════
+-- BLAKE2f test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.Blake2f in
+#eval do
+  IO.println "\nBLAKE2f"
+
+  let h : Array UInt64 := #[0, 0, 0, 0, 0, 0, 0, 0]
+  let m : Array UInt64 := #[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let result := blake2Compress 0 h m 0 0 false
+  assert "0-round output size" (result.size == 8)
+
+  let result1 := blake2Compress 1 h m 0 0 false
+  assert "1-round output size" (result1.size == 8)
+  assert "1-round differs from 0-round" (result1 != result)
+
+  -- Invalid precompile input (wrong length)
+  assert "precompile rejects wrong length" (blake2FPrecompile #[0] == none)
+
+-- ═══════════════════════════════════════════════════════════════
+-- BN256/alt_bn128 test vectors
+-- ═══════════════════════════════════════════════════════════════
+
+open ETHCryptoLean.BN256 in
+#eval do
+  IO.println "\nBN256/alt_bn128"
+
+  assert "G1 generator on curve" (g1OnCurve g1Gen)
+  assert "G1 infinity on curve" (g1OnCurve G1Point.infinity)
+  assert "G1: P + O = P" (g1Add g1Gen G1Point.infinity == g1Gen)
+  assert "G1: O + P = P" (g1Add G1Point.infinity g1Gen == g1Gen)
+  assert "G1: P + (-P) = O" (g1Add g1Gen (g1Neg g1Gen) == G1Point.infinity)
+  assert "ecAdd identity left" (ecAdd 0 0 1 2 == some (1, 2))
+  assert "ecAdd identity right" (ecAdd 1 2 0 0 == some (1, 2))
+  assert "2*G on curve" (g1OnCurve (g1Mul g1Gen 2))

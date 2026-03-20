@@ -3,6 +3,10 @@ import ETHCryptoLean.Keccak256
 import ETHCryptoLean.Secp256k1
 import ETHCryptoLean.Ecrecover
 import ETHCryptoLean.SHA256
+import ETHCryptoLean.RIPEMD160
+import ETHCryptoLean.ModExp
+import ETHCryptoLean.Blake2f
+import ETHCryptoLean.BN256
 import ETHCryptoLean.BLS12381.Fields
 import ETHCryptoLean.BLS12381.Curve
 import ETHCryptoLean.BLS12381.Pairing

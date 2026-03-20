@@ -38,7 +38,7 @@ partial def fpPow (base exp : Nat) : Nat :=
 def fpInv (a : Nat) : Nat := fpPow a (P - 2)
 def fpDiv (a b : Nat) : Nat := fpMul a (fpInv b)
 
--- Square root in Fp: since P ≡ 3 (mod 4), sqrt(a) = a^((P+1)/4)
+-- Square root in Fp
 def fpSqrt (a : Nat) : Option Nat :=
   let s := fpPow a ((P + 1) / 4)
   if fpMul s s == a % P then some s else none
@@ -66,7 +66,6 @@ def fp2Sub (a b : Fp2) : Fp2 := ⟨fpSub a.c0 b.c0, fpSub a.c1 b.c1⟩
 def fp2Neg (a : Fp2) : Fp2 := ⟨fpNeg a.c0, fpNeg a.c1⟩
 
 def fp2Mul (a b : Fp2) : Fp2 :=
-  -- (a0 + a1·u)(b0 + b1·u) = (a0·b0 - a1·b1) + (a0·b1 + a1·b0)·u
   ⟨fpSub (fpMul a.c0 b.c0) (fpMul a.c1 b.c1),
    fpAdd (fpMul a.c0 b.c1) (fpMul a.c1 b.c0)⟩
 
@@ -77,7 +76,7 @@ def fp2MulScalar (a : Fp2) (s : Nat) : Fp2 := ⟨fpMul a.c0 s, fpMul a.c1 s⟩
 -- Conjugate: (a + bu) → (a - bu)
 def fp2Conj (a : Fp2) : Fp2 := ⟨a.c0 % P, fpNeg a.c1⟩
 
--- Norm: a² + b² (since u² = -1, N(a+bu) = a² + b²)
+-- Norm: N(a+bu) = a² + b²
 def fp2Norm (a : Fp2) : Nat := fpAdd (fpMul a.c0 a.c0) (fpMul a.c1 a.c1)
 
 def fp2Inv (a : Fp2) : Fp2 :=
@@ -87,7 +86,7 @@ def fp2Inv (a : Fp2) : Fp2 :=
 
 def fp2Div (a b : Fp2) : Fp2 := fp2Mul a (fp2Inv b)
 
--- Multiply by u: u·(a + bu) = -b + au
+-- Multiply by u
 def fp2MulByU (a : Fp2) : Fp2 := ⟨fpNeg a.c1, a.c0 % P⟩
 
 partial def fp2Pow (base : Fp2) (exp : Nat) : Fp2 :=
@@ -105,28 +104,21 @@ def fp2Sign (a : Fp2) : Bool :=
   else fpSign a.c0
 
 -- Square root in Fp2
--- For a = a0 + a1·u, find b = b0 + b1·u with b² = a
--- b0² - b1² = a0, 2·b0·b1 = a1
--- Use: norm = a0² + a1², need sqrt(norm) in Fp
--- Then b0² = (a0 + sqrt(norm)) / 2 (try both signs)
 def fp2Sqrt (a : Fp2) : Option Fp2 :=
   if fp2IsZero a then some fp2Zero
   else if a.c1 % P == 0 then
-    -- Pure real: try sqrt in Fp
     match fpSqrt a.c0 with
     | some s => some ⟨s, 0⟩
     | none =>
-      -- a0 is not a QR in Fp, try sqrt(-a0) and return result * u
+      -- Try sqrt(-a0) * u
       match fpSqrt (fpNeg a.c0) with
       | some s => some ⟨0, s⟩
       | none => none
   else
-    -- General case
     let norm := fp2Norm a
     match fpSqrt norm with
     | none => none
     | some sqrtNorm =>
-      -- Try b0² = (a0 + sqrtNorm) / 2
       let two_inv := fpInv 2
       let b0sq := fpMul (fpAdd (a.c0 % P) sqrtNorm) two_inv
       match fpSqrt b0sq with
@@ -134,7 +126,6 @@ def fp2Sqrt (a : Fp2) : Option Fp2 :=
         let b1 := fpDiv (a.c1 % P) (fpMul 2 b0)
         some ⟨b0, b1⟩
       | none =>
-        -- Try b0² = (a0 - sqrtNorm) / 2
         let b0sq' := fpMul (fpSub (a.c0 % P) sqrtNorm) two_inv
         match fpSqrt b0sq' with
         | some b0 =>
@@ -174,22 +165,16 @@ def fp6Neg (a : Fp6) : Fp6 :=
   ⟨fp2Neg a.c0, fp2Neg a.c1, fp2Neg a.c2⟩
 
 -- Multiply an Fp2 element by ξ = 1 + u
--- ξ · (a + bu) = (a - b) + (a + b)u
 def fp2MulByXi (x : Fp2) : Fp2 := fp2Mul x XI
 
--- Multiply Fp6 element by v: v·(c0 + c1·v + c2·v²) = c2·ξ + c0·v + c1·v²
+-- Multiply Fp6 element by v
 def fp6MulByV (a : Fp6) : Fp6 :=
   ⟨fp2MulByXi a.c2, a.c0, a.c1⟩
 
 def fp6Mul (a b : Fp6) : Fp6 :=
-  -- Schoolbook: (a0 + a1·v + a2·v²)(b0 + b1·v + b2·v²) with v³ = ξ
-  -- c0 = a0·b0 + ξ·(a1·b2 + a2·b1)
-  -- c1 = a0·b1 + a1·b0 + ξ·(a2·b2)
-  -- c2 = a0·b2 + a1·b1 + a2·b0
   let t0 := fp2Mul a.c0 b.c0
   let t1 := fp2Mul a.c1 b.c1
   let t2 := fp2Mul a.c2 b.c2
-  -- Karatsuba-like
   let c0 := fp2Add t0 (fp2MulByXi (fp2Sub (fp2Mul (fp2Add a.c1 a.c2) (fp2Add b.c1 b.c2)) (fp2Add t1 t2)))
   let c1 := fp2Add (fp2Sub (fp2Mul (fp2Add a.c0 a.c1) (fp2Add b.c0 b.c1)) (fp2Add t0 t1)) (fp2MulByXi t2)
   let c2 := fp2Add (fp2Sub (fp2Mul (fp2Add a.c0 a.c2) (fp2Add b.c0 b.c2)) (fp2Add t0 t2)) t1
@@ -200,17 +185,8 @@ def fp6Sq (a : Fp6) : Fp6 := fp6Mul a a
 def fp6MulScalar (a : Fp6) (s : Fp2) : Fp6 :=
   ⟨fp2Mul a.c0 s, fp2Mul a.c1 s, fp2Mul a.c2 s⟩
 
+-- Inverse in Fp6 via cofactor method
 def fp6Inv (a : Fp6) : Fp6 :=
-  -- Using the formula for inverse in cubic extension
-  -- a^(-1) = (a0² - a1·a2·ξ, a2²·ξ - a0·a1, a1² - a0·a2) / det
-  -- where det = a0³ + a1³·ξ + a2³·ξ² - 3·a0·a1·a2·ξ
-  -- Actually, use cofactor method:
-  -- A = a0² - a1·a2·ξ  (wait, this doesn't look right)
-  -- Let me use the standard formula:
-  -- t0 = a0², t1 = a1², t2 = a2²
-  -- t3 = a0·a1, t4 = a0·a2, t5 = a1·a2
-  -- c0 = t0 - ξ·t5, c1 = ξ·t2 - t3, c2 = t1 - t4
-  -- det = a0·c0 + ξ·(a2·c1 + a1·c2)
   let t0 := fp2Sq a.c0
   let t1 := fp2Sq a.c1
   let t2 := fp2Sq a.c2
@@ -252,9 +228,6 @@ def fp12One  : Fp12 := ⟨fp6One, fp6Zero⟩
 @[inline] def fp12IsZero (a : Fp12) : Bool :=
   fp6IsZero a.c0 && fp6IsZero a.c1
 
--- Multiply Fp6 element by v (used in Fp12 multiplication)
--- Already defined as fp6MulByV
-
 def fp12Add (a b : Fp12) : Fp12 :=
   ⟨fp6Add a.c0 b.c0, fp6Add a.c1 b.c1⟩
 
@@ -265,8 +238,6 @@ def fp12Neg (a : Fp12) : Fp12 :=
   ⟨fp6Neg a.c0, fp6Neg a.c1⟩
 
 def fp12Mul (a b : Fp12) : Fp12 :=
-  -- (a0 + a1·w)(b0 + b1·w) = (a0·b0 + a1·b1·v) + (a0·b1 + a1·b0)·w
-  -- where w² = v
   let t0 := fp6Mul a.c0 b.c0
   let t1 := fp6Mul a.c1 b.c1
   let c0 := fp6Add t0 (fp6MulByV t1)
@@ -276,11 +247,9 @@ def fp12Mul (a b : Fp12) : Fp12 :=
 def fp12Sq (a : Fp12) : Fp12 := fp12Mul a a
 
 -- Conjugate in Fp12: (a + bw) → (a - bw)
--- This computes a^(p^6) since the p^6-Frobenius negates w
 def fp12Conj (a : Fp12) : Fp12 := ⟨a.c0, fp6Neg a.c1⟩
 
 def fp12Inv (a : Fp12) : Fp12 :=
-  -- (a0 + a1·w)^(-1) = (a0 - a1·w) / (a0² - a1²·v)
   let t0 := fp6Sq a.c0
   let t1 := fp6Sq a.c1
   let det := fp6Sub t0 (fp6MulByV t1)

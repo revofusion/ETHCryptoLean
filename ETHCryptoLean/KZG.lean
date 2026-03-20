@@ -27,22 +27,7 @@ def VERSIONED_HASH_VERSION_KZG : UInt8 := 0x01
 -- KZG Verification
 -- ═══════════════════════════════════════════
 
--- The KZG verification equation:
--- e(C - y·G1, G2_gen) == e(proof, s·G2 - z·G2_gen)
--- Equivalently:
--- e(C - y·G1, G2_gen) · e(-proof, s·G2 - z·G2_gen) == 1
---
--- Where:
--- - C is the commitment (G1 point)
--- - y is the claimed evaluation (scalar)
--- - z is the evaluation point (scalar)
--- - proof is the KZG proof (G1 point)
--- - G1 is the G1 generator
--- - G2_gen is the G2 generator
--- - s·G2 is from the trusted setup
-
--- KZG verification given all components
--- sG2 is the trusted setup point s·G2_gen
+-- KZG verification: e(C - y·G1, G2) · e(-proof, s·G2 - z·G2) == 1
 def kzgVerify
     (commitment : G1Point)
     (z : Nat)
@@ -67,7 +52,6 @@ def kzgVerify
 -- ═══════════════════════════════════════════
 
 -- Compute versioned hash from commitment bytes
--- SHA256(commitment)[1:] with version byte 0x01 prepended
 def versionedHash (commitmentBytes : Array UInt8) : Array UInt8 :=
   let h := SHA256.hash commitmentBytes
   -- Replace first byte with version byte
@@ -75,7 +59,7 @@ def versionedHash (commitmentBytes : Array UInt8) : Array UInt8 :=
     let h := h.set! 0 VERSIONED_HASH_VERSION_KZG.toNat.toUInt8
     h.extract 0 32
   else
-    h  -- shouldn't happen with valid SHA256
+    h
 
 -- ═══════════════════════════════════════════
 -- Precompile interface
@@ -85,7 +69,7 @@ def versionedHash (commitmentBytes : Array UInt8) : Array UInt8 :=
 private def natTo32BytesBE (n : Nat) : Array UInt8 :=
   natToBytesBE n 32
 
--- Success output: FIELD_ELEMENTS_PER_BLOB and BLS_MODULUS as 32-byte big-endian values
+-- Success output: FIELD_ELEMENTS_PER_BLOB and BLS_MODULUS as 32-byte big-endian
 private def successOutput : Array UInt8 :=
   natTo32BytesBE FIELD_ELEMENTS_PER_BLOB ++ natTo32BytesBE BLS_MODULUS
 
