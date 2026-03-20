@@ -2,3 +2,8 @@ import ETHCryptoLean.UInt256
 import ETHCryptoLean.Keccak256
 import ETHCryptoLean.Secp256k1
 import ETHCryptoLean.Ecrecover
+import ETHCryptoLean.SHA256
+import ETHCryptoLean.BLS12381.Fields
+import ETHCryptoLean.BLS12381.Curve
+import ETHCryptoLean.BLS12381.Pairing
+import ETHCryptoLean.KZG
