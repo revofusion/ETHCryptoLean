@@ -1,473 +1,660 @@
-/-!
-# BN256 (alt_bn128) Elliptic Curve
-
-Implements the alt_bn128 elliptic curve operations for EVM precompiles
-at addresses 0x06 (ecAdd), 0x07 (ecMul), and 0x08 (ecPairing).
-
-Curve: y² = x³ + 3 over Fp
-p = 21888242871839275222246405745257275088696311157297823662689037894645226208583
-n = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+/-
+  BN256 / alt_bn128 Pairing Implementation for EVM Precompiles
+  Pure Lean 4, no FFI, no opaque.
 -/
 
 namespace ETHCryptoLean.BN256
 
 -- ============================================================
--- Field Parameters
+-- Field prime and curve parameters
 -- ============================================================
 
-/-- The prime field modulus for alt_bn128. -/
-def p : Nat := 21888242871839275222246405745257275088696311157297823662689037894645226208583
+def fieldPrime : Nat :=
+  21888242871839275222246405745257275088696311157297823662689037894645226208583
 
-/-- The curve order. -/
-def n : Nat := 21888242871839275222246405745257275088548364400416034343698204186575808495617
+def curveOrder : Nat :=
+  21888242871839275222246405745257275088548364400416034343698204186575808495617
+
+-- BN parameter u
+def bnU : Nat := 4965661367192848881
+
+-- Ate loop count = |6u + 2|
+def ateLoopCount : Nat := 29793968203157093288
+
+-- Number of bits in ateLoopCount (it's a 65-bit number, MSB at position 64)
+def ateLoopCountBits : Nat := 64
 
 -- ============================================================
--- Fp: Prime Field Arithmetic (mod p)
+-- Modular exponentiation
 -- ============================================================
 
-def fpAdd (a b : Nat) : Nat := (a + b) % p
-def fpSub (a b : Nat) : Nat := (a + p - b % p) % p
-def fpMul (a b : Nat) : Nat := (a * b) % p
-def fpNeg (a : Nat) : Nat := if a == 0 then 0 else p - a % p
-
-partial def fpPow (base exp : Nat) : Nat :=
-  if exp == 0 then 1
-  else if exp == 1 then base % p
+def natPowMod (base exp mod : Nat) : Nat :=
+  if mod <= 1 then 0
+  else if exp = 0 then 1
   else
-    let half := fpPow base (exp / 2)
-    let sq := fpMul half half
-    if exp % 2 == 0 then sq
-    else fpMul sq (base % p)
-
-def fpInv (a : Nat) : Nat := fpPow a (p - 2)
-def fpDiv (a b : Nat) : Nat := fpMul a (fpInv b)
-
--- ============================================================
--- G1: Points on y² = x³ + 3 over Fp
--- ============================================================
-
-inductive G1Point where
-  | infinity : G1Point
-  | affine : (x : Nat) → (y : Nat) → G1Point
-  deriving Repr, BEq
-
-def g1OnCurve : G1Point → Bool
-  | .infinity => true
-  | .affine x y =>
-    let lhs := fpMul y y
-    let rhs := fpAdd (fpMul (fpMul x x) x) 3
-    lhs == rhs
-
-def g1Gen : G1Point := .affine 1 2
-
-def g1Add (p1 p2 : G1Point) : G1Point :=
-  match p1, p2 with
-  | .infinity, q => q
-  | q, .infinity => q
-  | .affine x1 y1, .affine x2 y2 =>
-    if x1 == x2 then
-      if y1 == y2 then
-        if y1 == 0 then .infinity
-        else
-          let s := fpDiv (fpMul 3 (fpMul x1 x1)) (fpMul 2 y1)
-          let x3 := fpSub (fpMul s s) (fpAdd x1 x2)
-          let y3 := fpSub (fpMul s (fpSub x1 x3)) y1
-          .affine x3 y3
-      else .infinity
-    else
-      let s := fpDiv (fpSub y2 y1) (fpSub x2 x1)
-      let x3 := fpSub (fpSub (fpMul s s) x1) x2
-      let y3 := fpSub (fpMul s (fpSub x1 x3)) y1
-      .affine x3 y3
-
-def g1Neg : G1Point → G1Point
-  | .infinity => .infinity
-  | .affine x y => .affine x (fpNeg y)
-
-partial def g1Mul (pt : G1Point) (scalar : Nat) : G1Point :=
-  if scalar == 0 then .infinity
-  else if scalar == 1 then pt
-  else
-    let half := g1Mul pt (scalar / 2)
-    let doubled := g1Add half half
-    if scalar % 2 == 0 then doubled
-    else g1Add doubled pt
+    let half := natPowMod (base % mod) (exp / 2) mod
+    let halfSq := (half * half) % mod
+    if exp % 2 == 0 then halfSq
+    else (halfSq * (base % mod)) % mod
+termination_by exp
+decreasing_by omega
 
 -- ============================================================
--- Fp2: Quadratic Extension Field (a + b*i, where i² = -1)
+-- Fp arithmetic (integers mod fieldPrime)
+-- ============================================================
+
+abbrev Fp := Nat
+
+@[inline] def fpAdd (a b : Fp) : Fp := (a + b) % fieldPrime
+@[inline] def fpSub (a b : Fp) : Fp := (a + fieldPrime - b % fieldPrime) % fieldPrime
+@[inline] def fpMul (a b : Fp) : Fp := (a * b) % fieldPrime
+@[inline] def fpNeg (a : Fp) : Fp := if a % fieldPrime == 0 then 0 else fieldPrime - a % fieldPrime
+@[inline] def fpInv (a : Fp) : Fp := natPowMod a (fieldPrime - 2) fieldPrime
+
+-- ============================================================
+-- Fp2 = Fp[i] / (i² + 1)
 -- ============================================================
 
 structure Fp2 where
-  a : Nat
-  b : Nat
-  deriving Repr, BEq
+  c0 : Fp  -- real part
+  c1 : Fp  -- imaginary part (coefficient of i)
+deriving BEq, Repr, Inhabited
 
 def fp2Zero : Fp2 := ⟨0, 0⟩
 def fp2One : Fp2 := ⟨1, 0⟩
 
-def fp2IsZero (x : Fp2) : Bool := x.a % p == 0 && x.b % p == 0
+@[inline] def fp2IsZero (a : Fp2) : Bool := a.c0 % fieldPrime == 0 && a.c1 % fieldPrime == 0
 
-def fp2Add (x y : Fp2) : Fp2 := ⟨fpAdd x.a y.a, fpAdd x.b y.b⟩
-def fp2Sub (x y : Fp2) : Fp2 := ⟨fpSub x.a y.a, fpSub x.b y.b⟩
-def fp2Neg (x : Fp2) : Fp2 := ⟨fpNeg x.a, fpNeg x.b⟩
+@[inline] def fp2Add (a b : Fp2) : Fp2 := ⟨fpAdd a.c0 b.c0, fpAdd a.c1 b.c1⟩
+@[inline] def fp2Sub (a b : Fp2) : Fp2 := ⟨fpSub a.c0 b.c0, fpSub a.c1 b.c1⟩
+@[inline] def fp2Neg (a : Fp2) : Fp2 := ⟨fpNeg a.c0, fpNeg a.c1⟩
+@[inline] def fp2Conj (a : Fp2) : Fp2 := ⟨a.c0, fpNeg a.c1⟩
 
-/-- (a+bi)(c+di) = (ac-bd) + (ad+bc)i -/
-def fp2Mul (x y : Fp2) : Fp2 :=
-  ⟨fpSub (fpMul x.a y.a) (fpMul x.b y.b),
-   fpAdd (fpMul x.a y.b) (fpMul x.b y.a)⟩
+-- (a + bi)(c + di) = (ac - bd) + (ad + bc)i
+@[inline] def fp2Mul (a b : Fp2) : Fp2 :=
+  ⟨fpSub (fpMul a.c0 b.c0) (fpMul a.c1 b.c1),
+   fpAdd (fpMul a.c0 b.c1) (fpMul a.c1 b.c0)⟩
 
-def fp2Sq (x : Fp2) : Fp2 :=
-  ⟨fpSub (fpMul x.a x.a) (fpMul x.b x.b),
-   fpMul 2 (fpMul x.a x.b)⟩
+@[inline] def fp2Sq (a : Fp2) : Fp2 := fp2Mul a a
 
-def fp2ScalarMul (s : Nat) (x : Fp2) : Fp2 := ⟨fpMul s x.a, fpMul s x.b⟩
+-- Scalar multiplication by Fp element
+@[inline] def fp2ScalarMul (s : Fp) (a : Fp2) : Fp2 :=
+  ⟨fpMul s a.c0, fpMul s a.c1⟩
 
-def fp2Norm (x : Fp2) : Nat := fpAdd (fpMul x.a x.a) (fpMul x.b x.b)
+-- (a + bi)^(-1) = (a - bi)/(a² + b²)
+def fp2Inv (a : Fp2) : Fp2 :=
+  let norm := fpAdd (fpMul a.c0 a.c0) (fpMul a.c1 a.c1)
+  let normInv := fpInv norm
+  ⟨fpMul a.c0 normInv, fpMul (fpNeg a.c1) normInv⟩
 
-def fp2Inv (x : Fp2) : Fp2 :=
-  let invNorm := fpInv (fp2Norm x)
-  ⟨fpMul x.a invNorm, fpMul (fpNeg x.b) invNorm⟩
+@[inline] def fp2Div (a b : Fp2) : Fp2 := fp2Mul a (fp2Inv b)
 
-def fp2Div (x y : Fp2) : Fp2 := fp2Mul x (fp2Inv y)
-def fp2Conj (x : Fp2) : Fp2 := ⟨x.a, fpNeg x.b⟩
-
-partial def fp2Pow (base : Fp2) (exp : Nat) : Fp2 :=
-  if exp == 0 then fp2One
-  else if exp == 1 then base
+-- Exponentiation by repeated squaring
+def fp2Pow (base : Fp2) (exp : Nat) : Fp2 :=
+  if h : exp = 0 then fp2One
+  else if exp = 1 then base
   else
     let half := fp2Pow base (exp / 2)
-    let sq := fp2Mul half half
-    if exp % 2 == 0 then sq
-    else fp2Mul sq base
-
-/-- Multiply by ξ = 9 + i. (a+bi)(9+i) = (9a-b) + (a+9b)i -/
-def fp2MulByNonResidue (x : Fp2) : Fp2 :=
-  ⟨fpSub (fpMul 9 x.a) x.b, fpAdd x.a (fpMul 9 x.b)⟩
+    let halfSq := fp2Mul half half
+    if exp % 2 == 0 then halfSq
+    else fp2Mul halfSq base
+termination_by exp
+decreasing_by all_goals omega
 
 -- ============================================================
--- G2: Points on twisted curve y² = x³ + 3/(9+i) over Fp2
+-- Fp6 = Fp2[v] / (v³ - ξ) where ξ = 9 + i
+-- An element is c0 + c1·v + c2·v²
 -- ============================================================
 
-def twistB : Fp2 := fp2Div ⟨3, 0⟩ ⟨9, 1⟩
-
-inductive G2Point where
-  | infinity : G2Point
-  | affine : (x : Fp2) → (y : Fp2) → G2Point
-  deriving Repr, BEq
-
-def g2OnCurve : G2Point → Bool
-  | .infinity => true
-  | .affine x y =>
-    let lhs := fp2Sq y
-    let rhs := fp2Add (fp2Mul (fp2Sq x) x) twistB
-    lhs == rhs
-
-def g2Add (p1 p2 : G2Point) : G2Point :=
-  match p1, p2 with
-  | .infinity, q => q
-  | q, .infinity => q
-  | .affine x1 y1, .affine x2 y2 =>
-    if x1 == x2 then
-      if y1 == y2 then
-        if fp2IsZero y1 then .infinity
-        else
-          let s := fp2Div (fp2ScalarMul 3 (fp2Sq x1)) (fp2ScalarMul 2 y1)
-          let x3 := fp2Sub (fp2Sq s) (fp2Add x1 x2)
-          let y3 := fp2Sub (fp2Mul s (fp2Sub x1 x3)) y1
-          .affine x3 y3
-      else .infinity
-    else
-      let s := fp2Div (fp2Sub y2 y1) (fp2Sub x2 x1)
-      let x3 := fp2Sub (fp2Sub (fp2Sq s) x1) x2
-      let y3 := fp2Sub (fp2Mul s (fp2Sub x1 x3)) y1
-      .affine x3 y3
-
-def g2Neg : G2Point → G2Point
-  | .infinity => .infinity
-  | .affine x y => .affine x (fp2Neg y)
-
-partial def g2Mul (pt : G2Point) (scalar : Nat) : G2Point :=
-  if scalar == 0 then .infinity
-  else if scalar == 1 then pt
-  else
-    let half := g2Mul pt (scalar / 2)
-    let doubled := g2Add half half
-    if scalar % 2 == 0 then doubled
-    else g2Add doubled pt
-
--- ============================================================
--- Fp6 = Fp2[v] / (v³ - ξ), where ξ = 9 + i
--- ============================================================
+-- ξ = 9 + i (the non-residue used in the extension)
+def xi : Fp2 := ⟨9, 1⟩
 
 structure Fp6 where
   c0 : Fp2
   c1 : Fp2
   c2 : Fp2
-  deriving Repr, BEq
+deriving BEq, Repr, Inhabited
 
 def fp6Zero : Fp6 := ⟨fp2Zero, fp2Zero, fp2Zero⟩
 def fp6One : Fp6 := ⟨fp2One, fp2Zero, fp2Zero⟩
 
-def fp6Add (x y : Fp6) : Fp6 :=
-  ⟨fp2Add x.c0 y.c0, fp2Add x.c1 y.c1, fp2Add x.c2 y.c2⟩
+@[inline] def fp6Add (a b : Fp6) : Fp6 :=
+  ⟨fp2Add a.c0 b.c0, fp2Add a.c1 b.c1, fp2Add a.c2 b.c2⟩
 
-def fp6Sub (x y : Fp6) : Fp6 :=
-  ⟨fp2Sub x.c0 y.c0, fp2Sub x.c1 y.c1, fp2Sub x.c2 y.c2⟩
+@[inline] def fp6Sub (a b : Fp6) : Fp6 :=
+  ⟨fp2Sub a.c0 b.c0, fp2Sub a.c1 b.c1, fp2Sub a.c2 b.c2⟩
 
-def fp6Neg (x : Fp6) : Fp6 :=
-  ⟨fp2Neg x.c0, fp2Neg x.c1, fp2Neg x.c2⟩
+@[inline] def fp6Neg (a : Fp6) : Fp6 :=
+  ⟨fp2Neg a.c0, fp2Neg a.c1, fp2Neg a.c2⟩
 
-def fp6Mul (x y : Fp6) : Fp6 :=
-  let t0 := fp2Mul x.c0 y.c0
-  let t1 := fp2Mul x.c1 y.c1
-  let t2 := fp2Mul x.c2 y.c2
-  let c0 := fp2Add t0 (fp2MulByNonResidue (fp2Sub (fp2Sub (fp2Mul (fp2Add x.c1 x.c2) (fp2Add y.c1 y.c2)) t1) t2))
-  let c1 := fp2Add (fp2Sub (fp2Sub (fp2Mul (fp2Add x.c0 x.c1) (fp2Add y.c0 y.c1)) t0) t1) (fp2MulByNonResidue t2)
-  let c2 := fp2Add (fp2Sub (fp2Sub (fp2Mul (fp2Add x.c0 x.c2) (fp2Add y.c0 y.c2)) t0) t2) t1
+-- Multiply by v: (c0, c1, c2) * v = (c2·ξ, c0, c1)
+@[inline] def fp6MulByV (a : Fp6) : Fp6 :=
+  ⟨fp2Mul a.c2 xi, a.c0, a.c1⟩
+
+-- Multiplication:
+-- (a0 + a1·v + a2·v²)(b0 + b1·v + b2·v²)
+-- = [a0·b0 + (a1·b2 + a2·b1)·ξ]
+-- + [a0·b1 + a1·b0 + a2·b2·ξ]·v
+-- + [a0·b2 + a1·b1 + a2·b0]·v²
+def fp6Mul (a b : Fp6) : Fp6 :=
+  let t0 := fp2Mul a.c0 b.c0
+  let t1 := fp2Mul a.c1 b.c1
+  let t2 := fp2Mul a.c2 b.c2
+  let c0 := fp2Add t0 (fp2Mul (fp2Add (fp2Mul a.c1 b.c2) (fp2Mul a.c2 b.c1)) xi)
+  let c1 := fp2Add (fp2Add (fp2Mul a.c0 b.c1) (fp2Mul a.c1 b.c0)) (fp2Mul t2 xi)
+  let c2 := fp2Add (fp2Add (fp2Mul a.c0 b.c2) t1) (fp2Mul a.c2 b.c0)
   ⟨c0, c1, c2⟩
 
-def fp6Sq (x : Fp6) : Fp6 := fp6Mul x x
+-- Scalar multiplication by Fp2 element (embeds s as Fp6(s, 0, 0))
+@[inline] def fp6ScalarMul (s : Fp2) (a : Fp6) : Fp6 :=
+  ⟨fp2Mul s a.c0, fp2Mul s a.c1, fp2Mul s a.c2⟩
 
-def fp6Inv (x : Fp6) : Fp6 :=
-  let a := x.c0; let b := x.c1; let c := x.c2
-  let t0 := fp2Sub (fp2Sq a) (fp2MulByNonResidue (fp2Mul b c))
-  let t1 := fp2Sub (fp2MulByNonResidue (fp2Sq c)) (fp2Mul a b)
-  let t2 := fp2Sub (fp2Sq b) (fp2Mul a c)
-  let det := fp2Add (fp2Mul a t0) (fp2MulByNonResidue (fp2Add (fp2Mul c t1) (fp2Mul b t2)))
-  let detInv := fp2Inv det
-  ⟨fp2Mul t0 detInv, fp2Mul t1 detInv, fp2Mul t2 detInv⟩
+-- Scalar multiplication by Fp element
+@[inline] def fp6ScalarMulFp (s : Fp) (a : Fp6) : Fp6 :=
+  ⟨fp2ScalarMul s a.c0, fp2ScalarMul s a.c1, fp2ScalarMul s a.c2⟩
 
-/-- Multiply by v: shifts components with ξ-twist on overflow. -/
-def fp6MulByNonResidue (x : Fp6) : Fp6 :=
-  ⟨fp2MulByNonResidue x.c2, x.c0, x.c1⟩
+-- Inverse using Cramer's rule
+def fp6Inv (a : Fp6) : Fp6 :=
+  let A := fp2Sub (fp2Sq a.c0) (fp2Mul xi (fp2Mul a.c1 a.c2))
+  let B := fp2Sub (fp2Mul xi (fp2Sq a.c2)) (fp2Mul a.c0 a.c1)
+  let C := fp2Sub (fp2Sq a.c1) (fp2Mul a.c0 a.c2)
+  let D := fp2Add (fp2Mul a.c0 A) (fp2Mul xi (fp2Add (fp2Mul a.c2 B) (fp2Mul a.c1 C)))
+  let DInv := fp2Inv D
+  ⟨fp2Mul A DInv, fp2Mul B DInv, fp2Mul C DInv⟩
 
 -- ============================================================
 -- Fp12 = Fp6[w] / (w² - v)
+-- An element is c0 + c1·w where c0, c1 ∈ Fp6 and w² = v
 -- ============================================================
 
 structure Fp12 where
   c0 : Fp6
   c1 : Fp6
-  deriving Repr, BEq
+deriving BEq, Repr, Inhabited
 
 def fp12Zero : Fp12 := ⟨fp6Zero, fp6Zero⟩
 def fp12One : Fp12 := ⟨fp6One, fp6Zero⟩
 
-def fp12Add (x y : Fp12) : Fp12 := ⟨fp6Add x.c0 y.c0, fp6Add x.c1 y.c1⟩
-def fp12Sub (x y : Fp12) : Fp12 := ⟨fp6Sub x.c0 y.c0, fp6Sub x.c1 y.c1⟩
-def fp12Neg (x : Fp12) : Fp12 := ⟨fp6Neg x.c0, fp6Neg x.c1⟩
+@[inline] def fp12Add (a b : Fp12) : Fp12 :=
+  ⟨fp6Add a.c0 b.c0, fp6Add a.c1 b.c1⟩
 
-/-- (a0 + a1*w)(b0 + b1*w) = (a0*b0 + a1*b1*v) + (a0*b1 + a1*b0)*w -/
-def fp12Mul (x y : Fp12) : Fp12 :=
-  let t0 := fp6Mul x.c0 y.c0
-  let t1 := fp6Mul x.c1 y.c1
-  ⟨fp6Add t0 (fp6MulByNonResidue t1),
-   fp6Sub (fp6Sub (fp6Mul (fp6Add x.c0 x.c1) (fp6Add y.c0 y.c1)) t0) t1⟩
+@[inline] def fp12Sub (a b : Fp12) : Fp12 :=
+  ⟨fp6Sub a.c0 b.c0, fp6Sub a.c1 b.c1⟩
 
-def fp12Sq (x : Fp12) : Fp12 := fp12Mul x x
+@[inline] def fp12Neg (a : Fp12) : Fp12 :=
+  ⟨fp6Neg a.c0, fp6Neg a.c1⟩
 
-def fp12Inv (x : Fp12) : Fp12 :=
-  let t := fp6Sub (fp6Sq x.c0) (fp6MulByNonResidue (fp6Sq x.c1))
+-- Conjugation (p^6 Frobenius): negate the w coefficient
+@[inline] def fp12Conj (a : Fp12) : Fp12 :=
+  ⟨a.c0, fp6Neg a.c1⟩
+
+-- Multiplication: (a + bw)(c + dw) = (ac + bd·v_fp6) + (ad + bc)w
+def fp12Mul (a b : Fp12) : Fp12 :=
+  let ac := fp6Mul a.c0 b.c0
+  let bd := fp6Mul a.c1 b.c1
+  ⟨fp6Add ac (fp6MulByV bd),
+   fp6Add (fp6Mul a.c0 b.c1) (fp6Mul a.c1 b.c0)⟩
+
+def fp12Sq (a : Fp12) : Fp12 := fp12Mul a a
+
+-- Inverse: (a + bw)^(-1) = (a - bw) / (a² - b²·v)
+def fp12Inv (a : Fp12) : Fp12 :=
+  let t := fp6Sub (fp6Mul a.c0 a.c0) (fp6MulByV (fp6Mul a.c1 a.c1))
   let tInv := fp6Inv t
-  ⟨fp6Mul x.c0 tInv, fp6Neg (fp6Mul x.c1 tInv)⟩
+  ⟨fp6Mul a.c0 tInv, fp6Neg (fp6Mul a.c1 tInv)⟩
 
-def fp12Conj (x : Fp12) : Fp12 := ⟨x.c0, fp6Neg x.c1⟩
-
-partial def fp12Pow (base : Fp12) (exp : Nat) : Fp12 :=
-  if exp == 0 then fp12One
-  else if exp == 1 then base
+-- Exponentiation by repeated squaring
+def fp12Pow (base : Fp12) (exp : Nat) : Fp12 :=
+  if h : exp = 0 then fp12One
+  else if exp = 1 then base
   else
     let half := fp12Pow base (exp / 2)
-    let sq := fp12Sq half
-    if exp % 2 == 0 then sq
-    else fp12Mul sq base
+    let halfSq := fp12Mul half half
+    if exp % 2 == 0 then halfSq
+    else fp12Mul halfSq base
+termination_by exp
+decreasing_by all_goals omega
 
 -- ============================================================
--- Line Functions for Optimal Ate Pairing
+-- Frobenius endomorphisms
 -- ============================================================
 
-/-- Evaluate line through T and Q at point P (for addition step).
-    Returns a sparse Fp12 element. -/
-def lineFuncAdd (t q : G2Point) (pG1 : G1Point) : Fp12 :=
-  match t, q, pG1 with
-  | .affine xt yt, .affine xq yq, .affine xp yp =>
-    let slope := fp2Div (fp2Sub yq yt) (fp2Sub xq xt)
-    -- Line evaluation at P encoded in Fp12
-    ⟨⟨fp2Sub (fp2Mul slope xt) yt, ⟨fpNeg yp, 0⟩, fp2Zero⟩,
-     ⟨fp2Neg slope, ⟨xp, 0⟩, fp2Zero⟩⟩
-  | _, _, _ => fp12One
+-- Frobenius constants
+def frobGamma1 : Fp2 := fp2Pow xi ((fieldPrime - 1) / 3)
+def frobGamma12 : Fp2 := fp2Sq frobGamma1
+def frobGammaW : Fp2 := fp2Pow xi ((fieldPrime - 1) / 6)
 
-/-- Evaluate tangent line at T at point P (for doubling step). -/
-def lineFuncDouble (t : G2Point) (pG1 : G1Point) : Fp12 :=
-  match t, pG1 with
-  | .affine xt yt, .affine xp yp =>
-    if fp2IsZero yt then fp12One
-    else
-      let slope := fp2Div (fp2ScalarMul 3 (fp2Sq xt)) (fp2ScalarMul 2 yt)
-      ⟨⟨fp2Sub (fp2Mul slope xt) yt, ⟨fpNeg yp, 0⟩, fp2Zero⟩,
-       ⟨fp2Neg slope, ⟨xp, 0⟩, fp2Zero⟩⟩
-  | _, _ => fp12One
+-- For p²-Frobenius (Fp elements: norms)
+def xiNorm : Fp := 82
+def frob2Delta1 : Fp := natPowMod xiNorm ((fieldPrime - 1) / 3) fieldPrime
+def frob2Delta2 : Fp := fpMul frob2Delta1 frob2Delta1
+def frob2DeltaW : Fp := natPowMod xiNorm ((fieldPrime - 1) / 6) fieldPrime
+
+-- p-Frobenius on Fp6
+def fp6Frob (a : Fp6) : Fp6 :=
+  ⟨fp2Conj a.c0,
+   fp2Mul (fp2Conj a.c1) frobGamma1,
+   fp2Mul (fp2Conj a.c2) frobGamma12⟩
+
+-- p-Frobenius on Fp12
+def fp12Frob (a : Fp12) : Fp12 :=
+  ⟨fp6Frob a.c0,
+   fp6ScalarMul frobGammaW (fp6Frob a.c1)⟩
+
+-- p²-Frobenius on Fp6
+def fp6Frob2 (a : Fp6) : Fp6 :=
+  ⟨a.c0,
+   fp2ScalarMul frob2Delta1 a.c1,
+   fp2ScalarMul frob2Delta2 a.c2⟩
+
+-- p²-Frobenius on Fp12
+def fp12Frob2 (a : Fp12) : Fp12 :=
+  ⟨fp6Frob2 a.c0,
+   fp6ScalarMulFp frob2DeltaW (fp6Frob2 a.c1)⟩
 
 -- ============================================================
--- Optimal Ate Pairing
+-- Frobenius on G2 points (in Fp2)
 -- ============================================================
 
-/-- The ate loop count: 6t + 2 = 29793968203157093289. -/
-def ateLoopCount : Nat := 29793968203157093289
+def g2FrobC1 : Fp2 := fp2Pow xi ((fieldPrime - 1) / 3)
+def g2FrobC2 : Fp2 := fp2Pow xi ((fieldPrime - 1) / 2)
+def g2Frob2C1 : Fp := natPowMod xiNorm ((fieldPrime - 1) / 3) fieldPrime
+def g2Frob2C2 : Fp := natPowMod xiNorm ((fieldPrime - 1) / 2) fieldPrime
 
-/-- Get bits of ate loop count (LSB first). -/
-partial def natToBits (nn : Nat) : Array Bool :=
-  if nn == 0 then #[]
+-- ============================================================
+-- G1 point (on E(Fp): y² = x³ + 3)
+-- ============================================================
+
+structure G1Point where
+  x : Fp
+  y : Fp
+  inf : Bool
+deriving BEq, Repr, Inhabited
+
+def g1Inf : G1Point := ⟨0, 0, true⟩
+
+def g1IsOnCurve (p : G1Point) : Bool :=
+  if p.inf then true
   else
-    let rest := natToBits (nn / 2)
-    #[nn % 2 == 1] ++ rest
+    let lhs := fpMul p.y p.y
+    let rhs := fpAdd (fpMul (fpMul p.x p.x) p.x) 3
+    lhs == rhs
 
-/-- Miller loop for optimal Ate pairing. -/
-partial def millerLoop (q : G2Point) (pPt : G1Point) : Fp12 :=
-  match q, pPt with
-  | .infinity, _ => fp12One
-  | _, .infinity => fp12One
-  | .affine _ _, .affine _ _ =>
-    let bits := natToBits ateLoopCount
-    if bits.size <= 1 then fp12One
+def g1Neg (p : G1Point) : G1Point :=
+  if p.inf then p
+  else ⟨p.x, fpNeg p.y, false⟩
+
+def g1Add (p q : G1Point) : G1Point :=
+  if p.inf then q
+  else if q.inf then p
+  else if p.x == q.x then
+    if p.y == q.y then
+      if p.y == 0 then g1Inf
+      else
+        let lam := fpMul (fpMul 3 (fpMul p.x p.x)) (fpInv (fpMul 2 p.y))
+        let x3 := fpSub (fpMul lam lam) (fpMul 2 p.x)
+        let y3 := fpSub (fpMul lam (fpSub p.x x3)) p.y
+        ⟨x3, y3, false⟩
+    else g1Inf
+  else
+    let lam := fpMul (fpSub q.y p.y) (fpInv (fpSub q.x p.x))
+    let x3 := fpSub (fpSub (fpMul lam lam) p.x) q.x
+    let y3 := fpSub (fpMul lam (fpSub p.x x3)) p.y
+    ⟨x3, y3, false⟩
+
+def g1ScalarMul (n : Nat) (p : G1Point) : G1Point :=
+  if h : n = 0 then g1Inf
+  else if n = 1 then p
+  else
+    let half := g1ScalarMul (n / 2) p
+    let doubled := g1Add half half
+    if n % 2 == 0 then doubled
+    else g1Add doubled p
+termination_by n
+decreasing_by all_goals omega
+
+-- ============================================================
+-- G2 point (on twist E'(Fp2): y² = x³ + 3/ξ)
+-- ============================================================
+
+def twistB : Fp2 := fp2Div ⟨3, 0⟩ xi
+
+structure G2Point where
+  x : Fp2
+  y : Fp2
+  inf : Bool
+deriving BEq, Repr, Inhabited
+
+def g2Inf : G2Point := ⟨fp2Zero, fp2Zero, true⟩
+
+def g2IsOnCurve (p : G2Point) : Bool :=
+  if p.inf then true
+  else
+    let lhs := fp2Sq p.y
+    let rhs := fp2Add (fp2Mul (fp2Sq p.x) p.x) twistB
+    lhs == rhs
+
+def g2Neg (p : G2Point) : G2Point :=
+  if p.inf then p
+  else ⟨p.x, fp2Neg p.y, false⟩
+
+def g2Double (p : G2Point) : G2Point :=
+  if p.inf then p
+  else if fp2IsZero p.y then g2Inf
+  else
+    let lam := fp2Div (fp2ScalarMul 3 (fp2Sq p.x)) (fp2ScalarMul 2 p.y)
+    let x3 := fp2Sub (fp2Sq lam) (fp2ScalarMul 2 p.x)
+    let y3 := fp2Sub (fp2Mul lam (fp2Sub p.x x3)) p.y
+    ⟨x3, y3, false⟩
+
+def g2Add (p q : G2Point) : G2Point :=
+  if p.inf then q
+  else if q.inf then p
+  else if p.x == q.x then
+    if p.y == q.y then g2Double p
+    else g2Inf
+  else
+    let lam := fp2Div (fp2Sub q.y p.y) (fp2Sub q.x p.x)
+    let x3 := fp2Sub (fp2Sub (fp2Sq lam) p.x) q.x
+    let y3 := fp2Sub (fp2Mul lam (fp2Sub p.x x3)) p.y
+    ⟨x3, y3, false⟩
+
+def g2ScalarMul (n : Nat) (p : G2Point) : G2Point :=
+  if h : n = 0 then g2Inf
+  else if n = 1 then p
+  else
+    let half := g2ScalarMul (n / 2) p
+    let doubled := g2Add half half
+    if n % 2 == 0 then doubled
+    else g2Add doubled p
+termination_by n
+decreasing_by all_goals omega
+
+-- Frobenius on G2
+def g2Frobenius (q : G2Point) : G2Point :=
+  if q.inf then q
+  else ⟨fp2Mul (fp2Conj q.x) g2FrobC1,
+        fp2Mul (fp2Conj q.y) g2FrobC2,
+        false⟩
+
+def g2Frobenius2 (q : G2Point) : G2Point :=
+  if q.inf then q
+  else ⟨fp2ScalarMul g2Frob2C1 q.x,
+        fp2ScalarMul g2Frob2C2 q.y,
+        false⟩
+
+-- ============================================================
+-- Line function evaluation
+-- ============================================================
+
+-- The line function value at G1 point P=(px,py) given slope λ and
+-- reference point R=(rx,ry) on E'(Fp2):
+--
+-- l(P) = py + (-λ·px)·w + (λ·rx - ry)·w³
+--
+-- In tower representation:
+-- c0 = Fp6((py,0), 0, 0)
+-- c1 = Fp6(-λ·(px,0), λ·rx - ry, 0)
+def lineFunc (slope : Fp2) (rx ry : Fp2) (px py : Fp) : Fp12 :=
+  let c0 : Fp6 := ⟨⟨py, 0⟩, fp2Zero, fp2Zero⟩
+  let t1 := fp2Neg (fp2Mul slope ⟨px, 0⟩)
+  let t2 := fp2Sub (fp2Mul slope rx) ry
+  let c1 : Fp6 := ⟨t1, t2, fp2Zero⟩
+  ⟨c0, c1⟩
+
+-- Compute tangent slope at R = (rx, ry) on E'(Fp2)
+@[inline] def tangentSlope (rx ry : Fp2) : Fp2 :=
+  fp2Div (fp2ScalarMul 3 (fp2Sq rx)) (fp2ScalarMul 2 ry)
+
+-- Compute chord slope through R and Q
+@[inline] def chordSlope (rx ry qx qy : Fp2) : Fp2 :=
+  fp2Div (fp2Sub qy ry) (fp2Sub qx rx)
+
+-- ============================================================
+-- Miller loop
+-- ============================================================
+
+structure MillerState where
+  rx : Fp2
+  ry : Fp2
+  rInf : Bool
+  f : Fp12
+
+-- Process one bit of the Miller loop
+def millerStep (s : MillerState) (qx qy : Fp2) (px py : Fp) (bit : Bool) : MillerState :=
+  if s.rInf then
+    { s with f := fp12Sq s.f }
+  else
+    -- Doubling step
+    let f' := fp12Sq s.f
+    let (f'', rx', ry', rInf') :=
+      if fp2IsZero s.ry then
+        (f', fp2Zero, fp2Zero, true)
+      else
+        let slope := tangentSlope s.rx s.ry
+        let lv := lineFunc slope s.rx s.ry px py
+        let f2 := fp12Mul f' lv
+        let nx := fp2Sub (fp2Sq slope) (fp2ScalarMul 2 s.rx)
+        let ny := fp2Sub (fp2Mul slope (fp2Sub s.rx nx)) s.ry
+        (f2, nx, ny, false)
+    -- Addition step
+    if bit && !rInf' then
+      if rx' == qx then
+        if ry' == qy then
+          { rx := rx', ry := ry', rInf := rInf', f := f'' }
+        else
+          { rx := fp2Zero, ry := fp2Zero, rInf := true, f := f'' }
+      else
+        let slope := chordSlope rx' ry' qx qy
+        let lv := lineFunc slope rx' ry' px py
+        let f3 := fp12Mul f'' lv
+        let nx := fp2Sub (fp2Sub (fp2Sq slope) rx') qx
+        let ny := fp2Sub (fp2Mul slope (fp2Sub rx' nx)) ry'
+        { rx := nx, ry := ny, rInf := false, f := f3 }
     else
-      -- Start from the most significant bit (which is always 1)
-      -- and iterate down to bit 0
-      let topIdx := bits.size - 1
-      -- Initialize: T = Q, f = 1
-      go (topIdx - 1) q pPt bits fp12One q
-  where
-    go (idx : Nat) (q : G2Point) (pPt : G1Point) (bits : Array Bool)
-        (f : Fp12) (t : G2Point) : Fp12 :=
-      -- Doubling step
-      let lf := lineFuncDouble t pPt
-      let f := fp12Mul (fp12Sq f) lf
-      let t := g2Add t t
-      -- Addition step if bit is set
-      let (f, t) :=
-        if bits[idx]! then
-          let lf := lineFuncAdd t q pPt
-          (fp12Mul f lf, g2Add t q)
-        else (f, t)
-      if idx == 0 then f
-      else go (idx - 1) q pPt bits f t
+      { rx := rx', ry := ry', rInf := rInf', f := f'' }
 
-/-- Final exponentiation: f^((p^12 - 1) / n). -/
+-- Get bit at position pos (0-indexed from LSB)
+@[inline] def getBit (n : Nat) (pos : Nat) : Bool := (n >>> pos) &&& 1 == 1
+
+-- Frobenius correction step: add a point to the running state
+def addCorrectionPoint (s : MillerState) (qx qy : Fp2) (qInf : Bool) (px py : Fp) : MillerState :=
+  if s.rInf || qInf then s
+  else if s.rx == qx then
+    if s.ry == qy then
+      if fp2IsZero s.ry then s
+      else
+        let slope := tangentSlope s.rx s.ry
+        let lv := lineFunc slope s.rx s.ry px py
+        let f' := fp12Mul s.f lv
+        let r := g2Double ⟨s.rx, s.ry, false⟩
+        { rx := r.x, ry := r.y, rInf := r.inf, f := f' }
+    else
+      { s with rInf := true }
+  else
+    let slope := chordSlope s.rx s.ry qx qy
+    let lv := lineFunc slope s.rx s.ry px py
+    let f' := fp12Mul s.f lv
+    let nx := fp2Sub (fp2Sub (fp2Sq slope) s.rx) qx
+    let ny := fp2Sub (fp2Mul slope (fp2Sub s.rx nx)) s.ry
+    { rx := nx, ry := ny, rInf := false, f := f' }
+
+-- Main Miller loop
+def millerLoop (q : G2Point) (p : G1Point) : Fp12 :=
+  if p.inf || q.inf then fp12One
+  else
+    let px := p.x
+    let py := p.y
+    let qx := q.x
+    let qy := q.y
+
+    -- Initialize: R = Q, f = 1
+    let initState : MillerState := {
+      rx := qx, ry := qy, rInf := false, f := fp12One
+    }
+
+    -- Iterate from bit (ateLoopCountBits - 1) down to 0
+    let state := (List.range ateLoopCountBits).foldl
+      (fun s i =>
+        let bitPos := ateLoopCountBits - 1 - i
+        let bit := getBit ateLoopCount bitPos
+        millerStep s qx qy px py bit)
+      initState
+
+    -- Frobenius corrections
+    let q1 := g2Frobenius q
+    let nq2 := g2Neg (g2Frobenius2 q)
+
+    let state := addCorrectionPoint state q1.x q1.y q1.inf px py
+    let state := addCorrectionPoint state nq2.x nq2.y nq2.inf px py
+
+    state.f
+
+-- ============================================================
+-- Final exponentiation
+-- ============================================================
+
 def finalExp (f : Fp12) : Fp12 :=
-  -- Easy part: f^(p^6 - 1)
-  let f1 := fp12Conj f
-  let f2 := fp12Inv f
-  let t0 := fp12Mul f1 f2
-
-  -- f^(p^2 + 1) on the result
-  let t1 := fp12Pow t0 (p * p)
-  let t0 := fp12Mul t1 t0
-
-  -- Hard part: exponentiation by (p^4 - p^2 + 1) / n
-  let hardExp := ((p ^ 4 - p ^ 2 + 1) / n)
-  fp12Pow t0 hardExp
-
-/-- Compute the optimal Ate pairing e(P, Q). -/
-def pairing (pPt : G1Point) (q : G2Point) : Fp12 :=
-  let f := millerLoop q pPt
-  finalExp f
+  -- Easy part 1: f^(p^6 - 1) = conj(f) · f^(-1)
+  let f1 := fp12Mul (fp12Conj f) (fp12Inv f)
+  -- Easy part 2: f1^(p^2 + 1) = frob2(f1) · f1
+  let f2 := fp12Mul (fp12Frob2 f1) f1
+  -- Hard part: f2^((p^4 - p^2 + 1) / n)
+  let hardExp := (fieldPrime ^ 4 - fieldPrime ^ 2 + 1) / curveOrder
+  fp12Pow f2 hardExp
 
 -- ============================================================
--- Precompile Interfaces
+-- Pairing computation
 -- ============================================================
 
-/-- Read a 32-byte big-endian number from input. -/
-partial def readBytes32 (input : Array UInt8) (offset : Nat) : Nat :=
-  let rec go (i : Nat) (acc : Nat) : Nat :=
-    if i >= 32 then acc
+def pairing (q : G2Point) (p : G1Point) : Fp12 :=
+  finalExp (millerLoop q p)
+
+-- Multi-pairing: product of Miller loops, then single final exponentiation
+def multiMillerLoop (pairs : List (G2Point × G1Point)) : Fp12 :=
+  pairs.foldl (fun acc ⟨q, p⟩ => fp12Mul acc (millerLoop q p)) fp12One
+
+def multiPairing (pairs : List (G2Point × G1Point)) : Fp12 :=
+  finalExp (multiMillerLoop pairs)
+
+-- ============================================================
+-- Byte encoding/decoding for EVM precompile
+-- ============================================================
+
+def readUint256 (data : ByteArray) (offset : Nat) : Nat := Id.run do
+  let mut result : Nat := 0
+  for i in [:32] do
+    let idx := offset + i
+    let byte : UInt8 := if idx < data.size then data[idx]! else 0
+    result := result * 256 + byte.toNat
+  return result
+
+def writeUint256 (n : Nat) : ByteArray := Id.run do
+  let mut bytes : Array UInt8 := Array.empty
+  let mut val := n
+  for _ in [:32] do
+    bytes := bytes.push (val % 256).toUInt8
+    val := val / 256
+  -- Reverse to get big-endian
+  let mut result := ByteArray.empty
+  for i in [:32] do
+    result := result.push (bytes[31 - i]!)
+  return result
+
+-- Zero-pad input to required length
+def padInput (data : ByteArray) (len : Nat) : ByteArray := Id.run do
+  let mut result := data
+  for _ in [:len - data.size] do
+    result := result.push 0
+  return result
+
+-- Decode G1 point from 64 bytes at offset
+def decodeG1 (data : ByteArray) (offset : Nat) : Option G1Point :=
+  let x := readUint256 data offset
+  let y := readUint256 data (offset + 32)
+  if x == 0 && y == 0 then
+    some g1Inf
+  else if x >= fieldPrime || y >= fieldPrime then
+    none
+  else
+    let p : G1Point := ⟨x, y, false⟩
+    if g1IsOnCurve p then some p
+    else none
+
+-- Decode G2 point from 128 bytes at offset
+-- Encoding: x_imag(32) || x_real(32) || y_imag(32) || y_real(32)
+def decodeG2 (data : ByteArray) (offset : Nat) : Option G2Point :=
+  let xImag := readUint256 data offset
+  let xReal := readUint256 data (offset + 32)
+  let yImag := readUint256 data (offset + 64)
+  let yReal := readUint256 data (offset + 96)
+  if xImag == 0 && xReal == 0 && yImag == 0 && yReal == 0 then
+    some g2Inf
+  else if xImag >= fieldPrime || xReal >= fieldPrime ||
+          yImag >= fieldPrime || yReal >= fieldPrime then
+    none
+  else
+    let p : G2Point := ⟨⟨xReal, xImag⟩, ⟨yReal, yImag⟩, false⟩
+    if g2IsOnCurve p then some p
+    else none
+
+def encodeResult (b : Bool) : ByteArray := Id.run do
+  let mut result := ByteArray.empty
+  for _ in [:31] do
+    result := result.push 0
+  result := result.push (if b then 1 else 0)
+  return result
+
+-- ============================================================
+-- EVM Precompiles
+-- ============================================================
+
+-- bn256Add precompile (EIP-196)
+def ecAddPrecompile (input : ByteArray) : Option ByteArray :=
+  let data := padInput input 128
+  let p1 := decodeG1 data 0
+  let p2 := decodeG1 data 64
+  match p1, p2 with
+  | some p1, some p2 =>
+    let result := g1Add p1 p2
+    if result.inf then
+      some (writeUint256 0 ++ writeUint256 0)
     else
-      let idx := offset + i
-      let b := if idx < input.size then input[idx]!.toNat else 0
-      go (i + 1) (acc * 256 + b)
-  go 0 0
+      some (writeUint256 result.x ++ writeUint256 result.y)
+  | _, _ => none
 
-/-- Write a natural number as 32 big-endian bytes. -/
-def writeBytes32 (nn : Nat) : Array UInt8 :=
-  (List.range 32).map (fun i =>
-    let shift := (31 - i) * 8
-    ((nn >>> shift) % 256).toUInt8) |>.toArray
-
-/-- EC Add precompile (0x06). -/
-def ecAdd (p1x p1y p2x p2y : Nat) : Option (Nat × Nat) :=
-  let pt1 := if p1x == 0 && p1y == 0 then G1Point.infinity
-             else G1Point.affine (p1x % p) (p1y % p)
-  let pt2 := if p2x == 0 && p2y == 0 then G1Point.infinity
-             else G1Point.affine (p2x % p) (p2y % p)
-  if !g1OnCurve pt1 || !g1OnCurve pt2 then none
-  else
-    match g1Add pt1 pt2 with
-    | .infinity => some (0, 0)
-    | .affine x y => some (x, y)
-
-/-- EC Mul precompile (0x07). -/
-def ecMul (px py s : Nat) : Option (Nat × Nat) :=
-  let pt := if px == 0 && py == 0 then G1Point.infinity
-            else G1Point.affine (px % p) (py % p)
-  if !g1OnCurve pt then none
-  else
-    match g1Mul pt s with
-    | .infinity => some (0, 0)
-    | .affine x y => some (x, y)
-
-/-- EC Pairing precompile (0x08). -/
-def ecPairing (pairs : Array (Nat × Nat × Nat × Nat × Nat × Nat)) : Bool :=
-  let result := pairs.foldl (fun acc ⟨g1x, g1y, g2xi, g2xr, g2yi, g2yr⟩ =>
-    let p1 := if g1x == 0 && g1y == 0 then G1Point.infinity
-              else G1Point.affine (g1x % p) (g1y % p)
-    let q := if g2xr == 0 && g2xi == 0 && g2yr == 0 && g2yi == 0 then G2Point.infinity
-             else G2Point.affine ⟨g2xr % p, g2xi % p⟩ ⟨g2yr % p, g2yi % p⟩
-    let f := pairing p1 q
-    fp12Mul acc f) fp12One
-  result == fp12One
-
-/-- EC Add precompile wrapper (bytes). -/
-def ecAddPrecompile (input : Array UInt8) : Option (Array UInt8) :=
-  let p1x := readBytes32 input 0
-  let p1y := readBytes32 input 32
-  let p2x := readBytes32 input 64
-  let p2y := readBytes32 input 96
-  match ecAdd p1x p1y p2x p2y with
+-- bn256ScalarMul precompile (EIP-196)
+def ecMulPrecompile (input : ByteArray) : Option ByteArray :=
+  let data := padInput input 96
+  let p := decodeG1 data 0
+  let s := readUint256 data 64
+  match p with
+  | some p =>
+    let result := g1ScalarMul s p
+    if result.inf then
+      some (writeUint256 0 ++ writeUint256 0)
+    else
+      some (writeUint256 result.x ++ writeUint256 result.y)
   | none => none
-  | some (rx, ry) => some (writeBytes32 rx ++ writeBytes32 ry)
 
-/-- EC Mul precompile wrapper (bytes). -/
-def ecMulPrecompile (input : Array UInt8) : Option (Array UInt8) :=
-  let px := readBytes32 input 0
-  let py := readBytes32 input 32
-  let s := readBytes32 input 64
-  match ecMul px py s with
-  | none => none
-  | some (rx, ry) => some (writeBytes32 rx ++ writeBytes32 ry)
-
-/-- EC Pairing precompile wrapper (bytes). -/
-def ecPairingPrecompile (input : Array UInt8) : Option (Array UInt8) :=
+-- bn256Pairing precompile (EIP-197)
+def ecPairingPrecompile (input : ByteArray) : Option ByteArray :=
   if input.size % 192 != 0 then none
   else
     let numPairs := input.size / 192
-    let pairs := (List.range numPairs).foldl (fun arr i =>
-      let off := i * 192
-      arr.push (readBytes32 input off,
-                readBytes32 input (off + 32),
-                readBytes32 input (off + 64),
-                readBytes32 input (off + 96),
-                readBytes32 input (off + 128),
-                readBytes32 input (off + 160))) #[]
-    let valid := pairs.all (fun ⟨g1x, g1y, g2xi, g2xr, g2yi, g2yr⟩ =>
-      let p1 := if g1x == 0 && g1y == 0 then G1Point.infinity
-                else G1Point.affine (g1x % p) (g1y % p)
-      let q := if g2xr == 0 && g2xi == 0 && g2yr == 0 && g2yi == 0 then G2Point.infinity
-               else G2Point.affine ⟨g2xr % p, g2xi % p⟩ ⟨g2yr % p, g2yi % p⟩
-      g1OnCurve p1 && g2OnCurve q)
-    if !valid then none
-    else
-      let result := ecPairing pairs
-      if result then some (writeBytes32 1)
-      else some (writeBytes32 0)
+    -- Decode all pairs
+    let rec decodePairs (i : Nat) (acc : List (G2Point × G1Point)) : Option (List (G2Point × G1Point)) :=
+      if i >= numPairs then some acc.reverse
+      else
+        let offset := i * 192
+        match decodeG1 input offset, decodeG2 input (offset + 64) with
+        | some p, some q => decodePairs (i + 1) ((q, p) :: acc)
+        | _, _ => none
+    termination_by numPairs - i
+    match decodePairs 0 [] with
+    | none => none
+    | some pairs =>
+      let result := multiPairing pairs
+      some (encodeResult (result == fp12One))
 
--- ============================================================
 end ETHCryptoLean.BN256

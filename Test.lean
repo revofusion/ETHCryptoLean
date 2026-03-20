@@ -42,6 +42,13 @@ private def toHex (b : UInt8) : String :=
 def bytesToHex (bs : Array UInt8) : String :=
   bs.foldl (fun acc b => acc ++ toHex b) ""
 
+def baToHex (bs : ByteArray) : String :=
+  bs.foldl (fun acc b => acc ++ toHex b) ""
+
+def hexToBA (s : String) : ByteArray :=
+  let arr := hexToBytes s
+  arr.foldl (fun (ba : ByteArray) b => ba.push b) ByteArray.empty
+
 -- ═══════════════════════════════════════════════════════════════
 -- Test helpers
 -- ═══════════════════════════════════════════════════════════════
@@ -414,8 +421,8 @@ open ETHCryptoLean.BN256 in
     let mut stats : TestStats := {}
     for v in vectors do
       let input := hexToBytes v.input
-      let result := ecAddPrecompile input
-      let expectedBytes := hexToBytes v.expected
+      let result := ecAddPrecompile (hexToBA v.input)
+      let expectedBytes := hexToBA v.expected
       match result with
       | some output =>
         let ok := output == expectedBytes
@@ -424,7 +431,7 @@ open ETHCryptoLean.BN256 in
         else
           IO.println s!"  FAIL  {v.name}"
           IO.println s!"         expected: {v.expected}"
-          IO.println s!"         got:      {bytesToHex output}"
+          IO.println s!"         got:      {baToHex output}"
       | none =>
         if v.expected == "" then
           stats := stats.add true
@@ -448,8 +455,8 @@ open ETHCryptoLean.BN256 in
     let mut stats : TestStats := {}
     for v in vectors do
       let input := hexToBytes v.input
-      let result := ecMulPrecompile input
-      let expectedBytes := hexToBytes v.expected
+      let result := ecMulPrecompile (hexToBA v.input)
+      let expectedBytes := hexToBA v.expected
       match result with
       | some output =>
         let ok := output == expectedBytes
@@ -458,7 +465,7 @@ open ETHCryptoLean.BN256 in
         else
           IO.println s!"  FAIL  {v.name}"
           IO.println s!"         expected: {v.expected}"
-          IO.println s!"         got:      {bytesToHex output}"
+          IO.println s!"         got:      {baToHex output}"
       | none =>
         if v.expected == "" then
           stats := stats.add true
@@ -482,8 +489,8 @@ open ETHCryptoLean.BN256 in
     let mut stats : TestStats := {}
     for v in vectors do
       let input := hexToBytes v.input
-      let result := ecPairingPrecompile input
-      let expectedBytes := hexToBytes v.expected
+      let result := ecPairingPrecompile (hexToBA v.input)
+      let expectedBytes := hexToBA v.expected
       match result with
       | some output =>
         let ok := output == expectedBytes
@@ -492,7 +499,7 @@ open ETHCryptoLean.BN256 in
         else
           IO.println s!"  FAIL  {v.name}"
           IO.println s!"         expected: {v.expected}"
-          IO.println s!"         got:      {bytesToHex output}"
+          IO.println s!"         got:      {baToHex output}"
       | none =>
         if v.expected == "" then
           stats := stats.add true
@@ -518,7 +525,7 @@ open ETHCryptoLean.Blake2f in
     let mut stats : TestStats := {}
     for v in allVectors do
       let input := hexToBytes v.input
-      let result := blake2FPrecompile input
+      let result := blake2fPrecompile (hexToBA v.input)
       if v.expected == "" then
         -- Expect failure
         let ok := result.isNone
@@ -526,7 +533,7 @@ open ETHCryptoLean.Blake2f in
         if ok then IO.println s!"  PASS  {v.name} (expected failure)"
         else IO.println s!"  FAIL  {v.name} (expected failure but got result)"
       else
-        let expectedBytes := hexToBytes v.expected
+        let expectedBytes := hexToBA v.expected
         match result with
         | some output =>
           let ok := output == expectedBytes
@@ -535,7 +542,7 @@ open ETHCryptoLean.Blake2f in
           else
             IO.println s!"  FAIL  {v.name}"
             IO.println s!"         expected: {v.expected}"
-            IO.println s!"         got:      {bytesToHex output}"
+            IO.println s!"         got:      {baToHex output}"
         | none =>
           stats := stats.add false
           IO.println s!"  FAIL  {v.name} (got none, expected output)"
