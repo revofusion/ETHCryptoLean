@@ -158,52 +158,26 @@ def loadVectors (path : String) : IO (List TestVector) := do
   assert "large value roundtrip" ((UInt256.fromBytesBE large.toBytesBE) == large)
 
 -- ═══════════════════════════════════════════════════════════════
--- Keccak-256 test vectors (inline)
+-- Keccak-256 - JSON test vectors
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
-  IO.println "\nKeccak-256"
-
-  -- Empty string
-  let hash := Keccak.keccak256 #[]
-  let hex := bytesToHex hash
-  assert "keccak256(\"\")" (hex == "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
-
-  -- "abc"
-  let hash := Keccak.keccak256 "abc".toUTF8.data
-  let hex := bytesToHex hash
-  assert "keccak256(\"abc\")" (hex == "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45")
-
-  -- Single zero byte
-  let hash := Keccak.keccak256 #[0]
-  let hex := bytesToHex hash
-  assert "keccak256(0x00)" (hex == "bc36789e7a1e281436464229828f817d6612f7b477d66591ff96a9e064bcc98a")
-
-  -- "hello"
-  let hash := Keccak.keccak256 "hello".toUTF8.data
-  let hex := bytesToHex hash
-  assert "keccak256(\"hello\")" (hex == "1c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36deac8")
-
-  -- 32 zero bytes (common in Ethereum: empty storage slot hash)
-  let hash := Keccak.keccak256 (List.replicate 32 (0 : UInt8)).toArray
-  let hex := bytesToHex hash
-  assert "keccak256(32 zero bytes)" (hex == "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563")
-
-  -- Output is always 32 bytes
-  assert "output length (empty)" ((Keccak.keccak256 #[]).size == 32)
-  assert "output length (1 byte)" ((Keccak.keccak256 #[0x42]).size == 32)
-  assert "output length (136 bytes)" ((Keccak.keccak256 (List.replicate 136 (0xFF : UInt8)).toArray).size == 32)
-  assert "output length (137 bytes)" ((Keccak.keccak256 (List.replicate 137 (0xFF : UInt8)).toArray).size == 32)
-
-  -- Deterministic: same input always gives same output
-  let h1 := Keccak.keccak256 "test".toUTF8.data
-  let h2 := Keccak.keccak256 "test".toUTF8.data
-  assert "deterministic" (h1 == h2)
-
-  -- Different inputs give different outputs
-  let h1 := bytesToHex (Keccak.keccak256 "a".toUTF8.data)
-  let h2 := bytesToHex (Keccak.keccak256 "b".toUTF8.data)
-  assert "different inputs differ" (h1 != h2)
+  IO.println "\nKeccak-256 (JSON vectors)"
+  let vectors ← loadVectors "vectors/keccak256.json"
+  if vectors.isEmpty then IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let output := Keccak.keccak256 input
+      let ok := bytesToHex output == v.expected
+      stats := stats.add ok
+      if ok then IO.println s!"  PASS  {v.name}"
+      else
+        IO.println s!"  FAIL  {v.name}"
+        IO.println s!"         expected: {v.expected}"
+        IO.println s!"         got:      {bytesToHex output}"
+    IO.println s!"  keccak256: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
 -- secp256k1 curve tests (inline)
@@ -283,40 +257,26 @@ def loadVectors (path : String) : IO (List TestVector) := do
   assert "zero-slot hash nonzero" (zeroHash.toNat != 0)
 
 -- ═══════════════════════════════════════════════════════════════
--- SHA-256 test vectors (inline, no JSON vectors)
+-- SHA-256 - JSON test vectors (NIST)
 -- ═══════════════════════════════════════════════════════════════
 
 #eval do
-  IO.println "\nSHA-256"
-
-  -- Empty string
-  let hash := SHA256.hash #[]
-  let hex := bytesToHex hash
-  assert "sha256(\"\")" (hex == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-
-  -- "abc"
-  let hash := SHA256.hash "abc".toUTF8.data
-  let hex := bytesToHex hash
-  assert "sha256(\"abc\")" (hex == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-
-  -- "hello"
-  let hash := SHA256.hash "hello".toUTF8.data
-  let hex := bytesToHex hash
-  assert "sha256(\"hello\")" (hex == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
-
-  -- Output is always 32 bytes
-  assert "output length (empty)" ((SHA256.hash #[]).size == 32)
-  assert "output length (1 byte)" ((SHA256.hash #[0x42]).size == 32)
-
-  -- Deterministic
-  let h1 := SHA256.hash "test".toUTF8.data
-  let h2 := SHA256.hash "test".toUTF8.data
-  assert "deterministic" (h1 == h2)
-
-  -- Different from keccak
-  let sha := bytesToHex (SHA256.hash "abc".toUTF8.data)
-  let kec := bytesToHex (Keccak.keccak256 "abc".toUTF8.data)
-  assert "sha256 != keccak256" (sha != kec)
+  IO.println "\nSHA-256 (JSON vectors)"
+  let vectors ← loadVectors "vectors/sha256.json"
+  if vectors.isEmpty then IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let output := SHA256.hash input
+      let ok := bytesToHex output == v.expected
+      stats := stats.add ok
+      if ok then IO.println s!"  PASS  {v.name}"
+      else
+        IO.println s!"  FAIL  {v.name}"
+        IO.println s!"         expected: {v.expected}"
+        IO.println s!"         got:      {bytesToHex output}"
+    IO.println s!"  sha256: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
 -- BLS12-381 curve tests (inline)
@@ -371,23 +331,27 @@ open BLS12381 in
   assert "Fp2 mul c1" (prod.c1 == 10)
 
 -- ═══════════════════════════════════════════════════════════════
--- RIPEMD-160 test vectors (inline, no JSON vectors)
+-- RIPEMD-160 - JSON test vectors (official spec)
 -- ═══════════════════════════════════════════════════════════════
 
 open ETHCryptoLean.RIPEMD160 in
 #eval do
-  IO.println "\nRIPEMD-160"
-
-  let hash := ripemd160 #[]
-  assert "ripemd160(\"\")" (bytesToHex hash == "9c1185a5c5e9fc54612808977ee8f548b2258d31")
-
-  let hash := ripemd160 #[0x61]
-  assert "ripemd160(\"a\")" (bytesToHex hash == "0bdc9d2d256b3ee9daae347be6f4dc835a467ffe")
-
-  let hash := ripemd160 #[0x61, 0x62, 0x63]
-  assert "ripemd160(\"abc\")" (bytesToHex hash == "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc")
-
-  assert "output length" ((ripemd160 #[]).size == 20)
+  IO.println "\nRIPEMD-160 (JSON vectors)"
+  let vectors ← loadVectors "vectors/ripemd160.json"
+  if vectors.isEmpty then IO.println "  WARNING: No vectors loaded"
+  else
+    let mut stats : TestStats := {}
+    for v in vectors do
+      let input := hexToBytes v.input
+      let output := ripemd160 input
+      let ok := bytesToHex output == v.expected
+      stats := stats.add ok
+      if ok then IO.println s!"  PASS  {v.name}"
+      else
+        IO.println s!"  FAIL  {v.name}"
+        IO.println s!"         expected: {v.expected}"
+        IO.println s!"         got:      {bytesToHex output}"
+    IO.println s!"  ripemd160: {stats.passed}/{stats.passed + stats.failed} passed"
 
 -- ═══════════════════════════════════════════════════════════════
 -- ecRecover - JSON test vectors
