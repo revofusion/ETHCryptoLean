@@ -9,16 +9,18 @@ namespace ETHCryptoLean.ModExp
 
 /-- Binary modular exponentiation: `base ^ exp % modulus`.
     Returns 0 if `modulus = 0`. -/
-partial def modExp (base exp modulus : Nat) : Nat :=
+def modExp (base exp modulus : Nat) : Nat :=
   if modulus == 0 then 0
   else if modulus == 1 then 0
-  else go (base % modulus) exp modulus 1
+  else modExpGo (base % modulus) exp modulus 1
 where
-  go (base exp modulus acc : Nat) : Nat :=
-    if exp == 0 then acc
+  modExpGo (base exp modulus acc : Nat) : Nat :=
+    if h : exp = 0 then acc
     else
       let acc' := if exp % 2 == 1 then (acc * base) % modulus else acc
-      go ((base * base) % modulus) (exp / 2) modulus acc'
+      modExpGo ((base * base) % modulus) (exp / 2) modulus acc'
+  termination_by exp
+  decreasing_by omega
 
 /-- Read a big-endian unsigned integer from a byte array slice. -/
 def bytesToNat (input : Array UInt8) (offset len : Nat) : Nat :=

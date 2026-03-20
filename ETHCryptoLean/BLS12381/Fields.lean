@@ -26,14 +26,16 @@ def X_ABS : Nat := 0xd201000000010000
 @[inline] def fpNeg (a : Nat) : Nat := if a % P == 0 then 0 else P - a % P
 @[inline] def fpEq  (a b : Nat) : Bool := a % P == b % P
 
-partial def fpPow (base exp : Nat) : Nat :=
-  if exp == 0 then 1
+def fpPow (base exp : Nat) : Nat :=
+  if h : exp = 0 then 1
   else if exp == 1 then base % P
   else
     let half := fpPow base (exp / 2)
     let sq := (half * half) % P
     if exp % 2 == 0 then sq
     else (sq * (base % P)) % P
+termination_by exp
+decreasing_by omega
 
 def fpInv (a : Nat) : Nat := fpPow a (P - 2)
 def fpDiv (a b : Nat) : Nat := fpMul a (fpInv b)
@@ -89,14 +91,16 @@ def fp2Div (a b : Fp2) : Fp2 := fp2Mul a (fp2Inv b)
 -- Multiply by u
 def fp2MulByU (a : Fp2) : Fp2 := ⟨fpNeg a.c1, a.c0 % P⟩
 
-partial def fp2Pow (base : Fp2) (exp : Nat) : Fp2 :=
-  if exp == 0 then fp2One
+def fp2Pow (base : Fp2) (exp : Nat) : Fp2 :=
+  if h : exp = 0 then fp2One
   else if exp == 1 then ⟨base.c0 % P, base.c1 % P⟩
   else
     let half := fp2Pow base (exp / 2)
     let sq := fp2Mul half half
     if exp % 2 == 0 then sq
     else fp2Mul sq ⟨base.c0 % P, base.c1 % P⟩
+termination_by exp
+decreasing_by omega
 
 -- Fp2 sign for point compression (lexicographic, imaginary part first)
 def fp2Sign (a : Fp2) : Bool :=
@@ -200,14 +204,16 @@ def fp6Inv (a : Fp6) : Fp6 :=
   let detInv := fp2Inv det
   ⟨fp2Mul c0 detInv, fp2Mul c1 detInv, fp2Mul c2 detInv⟩
 
-partial def fp6Pow (base : Fp6) (exp : Nat) : Fp6 :=
-  if exp == 0 then fp6One
+def fp6Pow (base : Fp6) (exp : Nat) : Fp6 :=
+  if h : exp = 0 then fp6One
   else if exp == 1 then base
   else
     let half := fp6Pow base (exp / 2)
     let sq := fp6Mul half half
     if exp % 2 == 0 then sq
     else fp6Mul sq base
+termination_by exp
+decreasing_by omega
 
 def fp6Eq (a b : Fp6) : Bool :=
   fp2Eq a.c0 b.c0 && fp2Eq a.c1 b.c1 && fp2Eq a.c2 b.c2
@@ -258,14 +264,16 @@ def fp12Inv (a : Fp12) : Fp12 :=
 
 def fp12Div (a b : Fp12) : Fp12 := fp12Mul a (fp12Inv b)
 
-partial def fp12Pow (base : Fp12) (exp : Nat) : Fp12 :=
-  if exp == 0 then fp12One
+def fp12Pow (base : Fp12) (exp : Nat) : Fp12 :=
+  if h : exp = 0 then fp12One
   else if exp == 1 then base
   else
     let half := fp12Pow base (exp / 2)
     let sq := fp12Mul half half
     if exp % 2 == 0 then sq
     else fp12Mul sq base
+termination_by exp
+decreasing_by omega
 
 def fp12Eq (a b : Fp12) : Bool :=
   fp6Eq a.c0 b.c0 && fp6Eq a.c1 b.c1

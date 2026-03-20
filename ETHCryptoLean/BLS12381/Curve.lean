@@ -53,14 +53,16 @@ def g1Add (p1 p2 : G1Point) : G1Point :=
 
 def g1Double (pt : G1Point) : G1Point := g1Add pt pt
 
-partial def g1ScalarMul (n : Nat) (pt : G1Point) : G1Point :=
-  if n == 0 then .infinity
+def g1ScalarMul (n : Nat) (pt : G1Point) : G1Point :=
+  if h : n = 0 then .infinity
   else if n == 1 then pt
   else
     let half := g1ScalarMul (n / 2) pt
     let doubled := g1Add half half
     if n % 2 == 0 then doubled
     else g1Add doubled pt
+termination_by n
+decreasing_by omega
 
 -- G1 generator
 def G1_GEN : G1Point :=
@@ -112,14 +114,16 @@ def g2Add (p1 p2 : G2Point) : G2Point :=
 
 def g2Double (pt : G2Point) : G2Point := g2Add pt pt
 
-partial def g2ScalarMul (n : Nat) (pt : G2Point) : G2Point :=
-  if n == 0 then .infinity
+def g2ScalarMul (n : Nat) (pt : G2Point) : G2Point :=
+  if h : n = 0 then .infinity
   else if n == 1 then pt
   else
     let half := g2ScalarMul (n / 2) pt
     let doubled := g2Add half half
     if n % 2 == 0 then doubled
     else g2Add doubled pt
+termination_by n
+decreasing_by omega
 
 -- G2 generator (standard BLS12-381)
 def G2_GEN : G2Point :=
@@ -172,14 +176,16 @@ def g12Add (p1 p2 : G12Point) : G12Point :=
       let y3 := fp12Sub (fp12Mul lam (fp12Sub x1 x3)) y1
       .affine x3 y3
 
-partial def g12ScalarMul (n : Nat) (pt : G12Point) : G12Point :=
-  if n == 0 then .infinity
+def g12ScalarMul (n : Nat) (pt : G12Point) : G12Point :=
+  if h : n = 0 then .infinity
   else if n == 1 then pt
   else
     let half := g12ScalarMul (n / 2) pt
     let doubled := g12Add half half
     if n % 2 == 0 then doubled
     else g12Add doubled pt
+termination_by n
+decreasing_by omega
 
 -- ═══════════════════════════════════════════
 -- Twist / Untwist maps

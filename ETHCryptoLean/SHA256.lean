@@ -110,7 +110,7 @@ private def pad (msg : Array UInt8) : Array UInt8 :=
   padded
 
 /-- Compute SHA-256 hash of a byte array. Returns 32-byte hash. -/
-partial def hash (msg : Array UInt8) : Array UInt8 :=
+def hash (msg : Array UInt8) : Array UInt8 :=
   let padded := pad msg
   let numBlocks := padded.size / 64
   let finalH := Id.run do

@@ -37,13 +37,15 @@ private def lineAdd (t q : G12Point) (p : G12Point) : Fp12 :=
 -- ═══════════════════════════════════════════
 
 -- Get bits of n in MSB-first order (excluding leading zero)
-partial def toBitsMSB (n : Nat) : List Bool :=
-  if n == 0 then []
+def toBitsMSB (n : Nat) : List Bool :=
+  if h : n = 0 then []
   else if n == 1 then [true]
   else toBitsMSB (n / 2) ++ [n % 2 == 1]
+termination_by n
+decreasing_by omega
 
 -- Miller loop for f_{|x|, Q}(P)
-partial def millerLoop (p12 q12 : G12Point) : Fp12 :=
+def millerLoop (p12 q12 : G12Point) : Fp12 :=
   match p12, q12 with
   | .infinity, _ => fp12One
   | _, .infinity => fp12One

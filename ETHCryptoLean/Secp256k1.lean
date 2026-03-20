@@ -21,11 +21,22 @@ def modAdd (a b m : Nat) : Nat := (a + b) % m
 def modSub (a b m : Nat) : Nat := (a + m - b % m) % m
 def modMul (a b m : Nat) : Nat := (a * b) % m
 
-partial def extGcd (a b : Int) : Int × Int × Int :=
-  if b == 0 then (a, 1, 0)
+def extGcd (a b : Int) : Int × Int × Int :=
+  if h : b = 0 then (a, 1, 0)
   else
     let (g, x, y) := extGcd b (a % b)
     (g, y, x - (a / b) * y)
+termination_by b.natAbs
+decreasing_by
+  have h1 : 0 ≤ a % b := Int.emod_nonneg a h
+  rcases Int.lt_or_lt_of_ne h with hb | hb
+  · have hpos : 0 < (-b) := Int.neg_pos.mpr hb
+    have hmod : a % b < -b := by
+      rw [← Int.emod_neg] at *
+      exact Int.emod_lt_of_pos a hpos
+    omega
+  · have hmod := Int.emod_lt_of_pos a hb
+    omega
 
 def modInv (a m : Nat) : Nat :=
   let (g, x, _) := extGcd (Int.ofNat (a % m)) (Int.ofNat m)
@@ -33,14 +44,16 @@ def modInv (a m : Nat) : Nat :=
     ((x % Int.ofNat m + Int.ofNat m) % Int.ofNat m).toNat
   else 0
 
-partial def modPow (base exp m : Nat) : Nat :=
-  if exp == 0 then 1 % m
+def modPow (base exp m : Nat) : Nat :=
+  if h : exp = 0 then 1 % m
   else if exp == 1 then base % m
   else
     let half := modPow base (exp / 2) m
     let halfSq := modMul half half m
     if exp % 2 == 0 then halfSq
     else modMul halfSq (base % m) m
+termination_by exp
+decreasing_by omega
 
 inductive Point where
   | infinity : Point
@@ -78,14 +91,16 @@ def pointAdd (p1 p2 : Point) : Point :=
       let y3 := modSub (modMul lam (modSub x1 x3 p) p) y1 p
       Point.affine x3 y3
 
-partial def scalarMul (k : Nat) (pt : Point) : Point :=
-  if k == 0 then Point.infinity
+def scalarMul (k : Nat) (pt : Point) : Point :=
+  if h : k = 0 then Point.infinity
   else if k == 1 then pt
   else
     let half := scalarMul (k / 2) pt
     let doubled := pointDouble half
     if k % 2 == 0 then doubled
     else pointAdd doubled pt
+termination_by k
+decreasing_by omega
 
 def G : Point := Point.affine Gx Gy
 
