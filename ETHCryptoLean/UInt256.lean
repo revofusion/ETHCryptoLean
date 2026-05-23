@@ -2,10 +2,13 @@
   UInt256: 256-bit unsigned integer for Ethereum/secp256k1 computations.
   Represented as a natural number with modular arithmetic.
 -/
+module
+
+@[expose] public section
 
 def UInt256.MOD : Nat := 2 ^ 256
 
-private theorem UInt256.MOD_pos : 0 < UInt256.MOD := by decide
+theorem UInt256.MOD_pos : 0 < UInt256.MOD := by decide
 
 structure UInt256 where
   val : Fin UInt256.MOD

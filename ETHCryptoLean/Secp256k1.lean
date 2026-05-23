@@ -22,14 +22,14 @@ def modSub (a b m : Nat) : Nat := (a + m - b % m) % m
 def modMul (a b m : Nat) : Nat := (a * b) % m
 
 def extGcd (a b : Int) : Int × Int × Int :=
-  if h : b = 0 then (a, 1, 0)
+  if _h : b = 0 then (a, 1, 0)
   else
     let (g, x, y) := extGcd b (a % b)
     (g, y, x - (a / b) * y)
 termination_by b.natAbs
 decreasing_by
-  have h1 : 0 ≤ a % b := Int.emod_nonneg a h
-  rcases Int.lt_or_lt_of_ne h with hb | hb
+  have h1 : 0 ≤ a % b := Int.emod_nonneg a _h
+  rcases Int.lt_or_lt_of_ne _h with hb | hb
   · have hpos : 0 < (-b) := Int.neg_pos.mpr hb
     have hmod : a % b < -b := by
       rw [← Int.emod_neg] at *

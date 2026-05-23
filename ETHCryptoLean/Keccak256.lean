@@ -8,7 +8,10 @@
     - Capacity: 512 bits
     - 24 rounds: θ, ρ, π, χ, ι
 -/
-import ETHCryptoLean.UInt256
+module
+public import ETHCryptoLean.UInt256
+
+@[expose] public section
 
 namespace Keccak
 

@@ -27,7 +27,7 @@ def X_ABS : Nat := 0xd201000000010000
 @[inline] def fpEq  (a b : Nat) : Bool := a % P == b % P
 
 def fpPow (base exp : Nat) : Nat :=
-  if h : exp = 0 then 1
+  if exp = 0 then 1
   else if exp == 1 then base % P
   else
     let half := fpPow base (exp / 2)
@@ -92,7 +92,7 @@ def fp2Div (a b : Fp2) : Fp2 := fp2Mul a (fp2Inv b)
 def fp2MulByU (a : Fp2) : Fp2 := ⟨fpNeg a.c1, a.c0 % P⟩
 
 def fp2Pow (base : Fp2) (exp : Nat) : Fp2 :=
-  if h : exp = 0 then fp2One
+  if exp = 0 then fp2One
   else if exp == 1 then ⟨base.c0 % P, base.c1 % P⟩
   else
     let half := fp2Pow base (exp / 2)
