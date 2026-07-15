@@ -119,12 +119,17 @@ def wordsToBytes (words : Array UInt64) (numBytes : Nat) : Array UInt8 := Id.run
 def padMessage (msg : Array UInt8) (rateBytes : Nat) : Array UInt8 := Id.run do
   let msgLen := msg.size
   let r := msgLen % rateBytes
-  let padLen := if r == rateBytes - 1 then rateBytes + 1 else rateBytes - r
+  let padLen := rateBytes - r
   let mut padded := msg
-  padded := padded.push 0x01
-  for _ in [:padLen - 2] do
-    padded := padded.push 0x00
-  padded := padded.push 0x80
+  if padLen == 1 then
+    -- Only one byte of space left in the block: the domain-separator bit
+    -- and the final pad10*1 bit must share that single byte (0x01 | 0x80).
+    padded := padded.push 0x81
+  else
+    padded := padded.push 0x01
+    for _ in [:padLen - 2] do
+      padded := padded.push 0x00
+    padded := padded.push 0x80
   return padded
 
 /-- Keccak-256: arbitrary-length byte input → 32-byte output.
