@@ -3,11 +3,15 @@
   Hex encoding/decoding and byte-level read/write helpers.
 -/
 
+module
+
+@[expose] public section
+
 namespace ETHCryptoLean.Utils
 
 -- Hex encoding
 
-private def hexChar (n : Nat) : Char :=
+def hexChar (n : Nat) : Char :=
   if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
 
 def toHex (bytes : Array UInt8) : String :=
@@ -26,7 +30,7 @@ def baToHex (bytes : ByteArray) : String :=
 
 -- Hex decoding
 
-private def hexNibble (c : Char) : Option UInt8 :=
+def hexNibble (c : Char) : Option UInt8 :=
   if '0' ≤ c && c ≤ '9' then some (c.toNat - '0'.toNat).toUInt8
   else if 'a' ≤ c && c ≤ 'f' then some (c.toNat - 'a'.toNat + 10).toUInt8
   else if 'A' ≤ c && c ≤ 'F' then some (c.toNat - 'A'.toNat + 10).toUInt8

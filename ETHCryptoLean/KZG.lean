@@ -3,8 +3,11 @@
   Precompile address 0x0A for blob transaction verification.
 -/
 
-import ETHCryptoLean.BLS12381.Pairing
-import ETHCryptoLean.SHA256
+module
+public import ETHCryptoLean.BLS12381.Pairing
+public import ETHCryptoLean.SHA256
+
+@[expose] public section
 
 namespace KZG
 
@@ -66,11 +69,11 @@ def versionedHash (commitmentBytes : Array UInt8) : Array UInt8 :=
 -- ═══════════════════════════════════════════
 
 -- Convert Nat to 32-byte big-endian
-private def natTo32BytesBE (n : Nat) : Array UInt8 :=
+def natTo32BytesBE (n : Nat) : Array UInt8 :=
   natToBytesBE n 32
 
 -- Success output: FIELD_ELEMENTS_PER_BLOB and BLS_MODULUS as 32-byte big-endian
-private def successOutput : Array UInt8 :=
+def successOutput : Array UInt8 :=
   natTo32BytesBE FIELD_ELEMENTS_PER_BLOB ++ natTo32BytesBE BLS_MODULUS
 
 /--

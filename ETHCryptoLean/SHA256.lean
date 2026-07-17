@@ -1,11 +1,14 @@
-import ETHCryptoLean.Utils
+module
+public import ETHCryptoLean.Utils
+
+@[expose] public section
 
 open ETHCryptoLean.Utils
 
 namespace SHA256
 
 -- SHA-256 constants: first 32 bits of the fractional parts of the cube roots of the first 64 primes
-private def k : Array UInt32 := #[
+def k : Array UInt32 := #[
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
   0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -17,34 +20,34 @@ private def k : Array UInt32 := #[
 ]
 
 -- Initial hash values: first 32 bits of fractional parts of square roots of first 8 primes
-private def h0Init : Array UInt32 := #[
+def h0Init : Array UInt32 := #[
   0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
   0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
 ]
 
-@[inline] private def rotr (x : UInt32) (n : UInt32) : UInt32 :=
+@[inline] def rotr (x : UInt32) (n : UInt32) : UInt32 :=
   (x >>> n) ||| (x <<< (32 - n))
 
-@[inline] private def ch (x y z : UInt32) : UInt32 :=
+@[inline] def ch (x y z : UInt32) : UInt32 :=
   (x &&& y) ^^^ ((~~~x) &&& z)
 
-@[inline] private def maj (x y z : UInt32) : UInt32 :=
+@[inline] def maj (x y z : UInt32) : UInt32 :=
   (x &&& y) ^^^ (x &&& z) ^^^ (y &&& z)
 
-@[inline] private def bigSigma0 (x : UInt32) : UInt32 :=
+@[inline] def bigSigma0 (x : UInt32) : UInt32 :=
   rotr x 2 ^^^ rotr x 13 ^^^ rotr x 22
 
-@[inline] private def bigSigma1 (x : UInt32) : UInt32 :=
+@[inline] def bigSigma1 (x : UInt32) : UInt32 :=
   rotr x 6 ^^^ rotr x 11 ^^^ rotr x 25
 
-@[inline] private def smallSigma0 (x : UInt32) : UInt32 :=
+@[inline] def smallSigma0 (x : UInt32) : UInt32 :=
   rotr x 7 ^^^ rotr x 18 ^^^ (x >>> 3)
 
-@[inline] private def smallSigma1 (x : UInt32) : UInt32 :=
+@[inline] def smallSigma1 (x : UInt32) : UInt32 :=
   rotr x 17 ^^^ rotr x 19 ^^^ (x >>> 10)
 
 /-- Process a single 64-byte block and return updated hash state. -/
-private def processBlock (h : Array UInt32) (block : Array UInt8) : Array UInt32 :=
+def processBlock (h : Array UInt32) (block : Array UInt8) : Array UInt32 :=
   -- Prepare message schedule
   let w : Array UInt32 := Id.run do
     let mut w := Array.mkEmpty 64
@@ -83,7 +86,7 @@ private def processBlock (h : Array UInt32) (block : Array UInt8) : Array UInt32
     h[4]! + e, h[5]! + f, h[6]! + g, h[7]! + hh]
 
 /-- Pad the message according to SHA-256 padding rules. -/
-private def pad (msg : Array UInt8) : Array UInt8 :=
+def pad (msg : Array UInt8) : Array UInt8 :=
   let msgLen := msg.size
   let bitLen : UInt64 := msgLen.toUInt64 * 8
   -- Append 0x80 byte

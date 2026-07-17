@@ -3,6 +3,10 @@
   Based on go-ethereum reference implementation (accounts/abi/pack.go)
 -/
 
+module
+
+@[expose] public section
+
 namespace ETHCryptoLean.ABI
 
 /-- Convert a natural number to big-endian bytes (no padding). -/

@@ -3,7 +3,10 @@
   Pure Lean 4 implementation — no FFI, no opaque, no axiom.
   Curve: y² = x³ + 7 (mod p)
 -/
-import ETHCryptoLean.UInt256
+module
+public import ETHCryptoLean.UInt256
+
+@[expose] public section
 
 namespace Secp256k1
 

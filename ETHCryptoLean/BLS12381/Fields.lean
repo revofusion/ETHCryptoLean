@@ -3,6 +3,10 @@
   All arithmetic uses Nat with explicit modular reduction.
 -/
 
+module
+
+@[expose] public section
+
 namespace BLS12381
 
 -- BLS12-381 field prime

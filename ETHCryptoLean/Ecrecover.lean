@@ -5,9 +5,12 @@
   Given a message hash and signature (v, r, s), recovers the
   signer's Ethereum address. No FFI, no opaque, no axiom.
 -/
-import ETHCryptoLean.UInt256
-import ETHCryptoLean.Keccak256
-import ETHCryptoLean.Secp256k1
+module
+public import ETHCryptoLean.UInt256
+public import ETHCryptoLean.Keccak256
+public import ETHCryptoLean.Secp256k1
+
+@[expose] public section
 
 open Secp256k1
 

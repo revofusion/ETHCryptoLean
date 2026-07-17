@@ -1,4 +1,7 @@
-import ETHCryptoLean.Utils
+module
+public import ETHCryptoLean.Utils
+
+@[expose] public section
 
 open ETHCryptoLean.Utils
 

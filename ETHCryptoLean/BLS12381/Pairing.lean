@@ -3,7 +3,10 @@
   e : G1 × G2 → GT ⊂ Fp12*
 -/
 
-import ETHCryptoLean.BLS12381.Curve
+module
+public import ETHCryptoLean.BLS12381.Curve
+
+@[expose] public section
 
 namespace BLS12381
 
@@ -12,7 +15,7 @@ namespace BLS12381
 -- ═══════════════════════════════════════════
 
 -- Tangent line at T evaluated at P
-private def lineDouble (t : G12Point) (p : G12Point) : Fp12 :=
+def lineDouble (t : G12Point) (p : G12Point) : Fp12 :=
   match t, p with
   | .affine xt yt, .affine xp yp =>
     let xt_sq := fp12Mul xt xt
@@ -21,7 +24,7 @@ private def lineDouble (t : G12Point) (p : G12Point) : Fp12 :=
   | _, _ => fp12One
 
 -- Line through T and Q evaluated at P
-private def lineAdd (t q : G12Point) (p : G12Point) : Fp12 :=
+def lineAdd (t q : G12Point) (p : G12Point) : Fp12 :=
   match t, q, p with
   | .affine xt yt, .affine xq yq, .affine xp yp =>
     if fp12Eq xt xq then
@@ -78,58 +81,58 @@ def millerLoop (p12 q12 : G12Point) : Fp12 :=
 -- ═══════════════════════════════════════════
 
 -- Easy part: f^(p^6 - 1)
-private def easyPart1 (f : Fp12) : Fp12 :=
+def easyPart1 (f : Fp12) : Fp12 :=
   fp12Mul (fp12Conj f) (fp12Inv f)
 
 -- Frobenius constants: γ₁ = ξ^((p-1)/3), γ₂ = ξ^(2(p-1)/3)
-private def GAMMA_1_1 : Fp2 := fp2Pow XI ((P - 1) / 3)
-private def GAMMA_1_2 : Fp2 := fp2Pow XI (2 * (P - 1) / 3)
+def GAMMA_1_1 : Fp2 := fp2Pow XI ((P - 1) / 3)
+def GAMMA_1_2 : Fp2 := fp2Pow XI (2 * (P - 1) / 3)
 
 -- Frobenius on Fp12: γ_w = ξ^((p-1)/6)
-private def GAMMA_W : Fp2 := fp2Pow XI ((P - 1) / 6)
+def GAMMA_W : Fp2 := fp2Pow XI ((P - 1) / 6)
 
-private def fp6Frobenius (a : Fp6) : Fp6 :=
+def fp6Frobenius (a : Fp6) : Fp6 :=
   ⟨fp2Conj a.c0,
    fp2Mul (fp2Conj a.c1) GAMMA_1_1,
    fp2Mul (fp2Conj a.c2) GAMMA_1_2⟩
 
-private def fp12Frobenius (a : Fp12) : Fp12 :=
+def fp12Frobenius (a : Fp12) : Fp12 :=
   ⟨fp6Frobenius a.c0,
    fp6MulScalar (fp6Frobenius a.c1) GAMMA_W⟩
 
 -- Frobenius^2 constants
-private def GAMMA_2_1 : Fp2 := fp2Pow XI ((P * P - 1) / 3)
-private def GAMMA_2_2 : Fp2 := fp2Pow XI (2 * (P * P - 1) / 3)
-private def GAMMA_2_W : Fp2 := fp2Pow XI ((P * P - 1) / 6)
+def GAMMA_2_1 : Fp2 := fp2Pow XI ((P * P - 1) / 3)
+def GAMMA_2_2 : Fp2 := fp2Pow XI (2 * (P * P - 1) / 3)
+def GAMMA_2_W : Fp2 := fp2Pow XI ((P * P - 1) / 6)
 
-private def fp6Frobenius2 (a : Fp6) : Fp6 :=
+def fp6Frobenius2 (a : Fp6) : Fp6 :=
   ⟨a.c0,
    fp2Mul a.c1 GAMMA_2_1,
    fp2Mul a.c2 GAMMA_2_2⟩
 
-private def fp12Frobenius2 (a : Fp12) : Fp12 :=
+def fp12Frobenius2 (a : Fp12) : Fp12 :=
   ⟨fp6Frobenius2 a.c0,
    fp6MulScalar (fp6Frobenius2 a.c1) GAMMA_2_W⟩
 
 -- Frobenius^3
-private def GAMMA_3_1 : Fp2 := fp2Pow XI ((P ^ 3 - 1) / 3)
-private def GAMMA_3_2 : Fp2 := fp2Pow XI (2 * (P ^ 3 - 1) / 3)
-private def GAMMA_3_W : Fp2 := fp2Pow XI ((P ^ 3 - 1) / 6)
+def GAMMA_3_1 : Fp2 := fp2Pow XI ((P ^ 3 - 1) / 3)
+def GAMMA_3_2 : Fp2 := fp2Pow XI (2 * (P ^ 3 - 1) / 3)
+def GAMMA_3_W : Fp2 := fp2Pow XI ((P ^ 3 - 1) / 6)
 
-private def fp6Frobenius3 (a : Fp6) : Fp6 :=
+def fp6Frobenius3 (a : Fp6) : Fp6 :=
   ⟨fp2Conj a.c0,
    fp2Mul (fp2Conj a.c1) GAMMA_3_1,
    fp2Mul (fp2Conj a.c2) GAMMA_3_2⟩
 
-private def fp12Frobenius3 (a : Fp12) : Fp12 :=
+def fp12Frobenius3 (a : Fp12) : Fp12 :=
   ⟨fp6Frobenius3 a.c0,
    fp6MulScalar (fp6Frobenius3 a.c1) GAMMA_3_W⟩
 
 -- Hard part exponent: (p^4 - p^2 + 1) / r
-private def hardPartExponent : Nat :=
+def hardPartExponent : Nat :=
   (P ^ 4 - P ^ 2 + 1) / R
 
-private def finalExponentiation (f : Fp12) : Fp12 :=
+def finalExponentiation (f : Fp12) : Fp12 :=
   if fp12IsZero f then fp12Zero
   else
     let f1 := easyPart1 f

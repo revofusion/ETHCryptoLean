@@ -19,11 +19,15 @@ namespace UInt256
 instance : Inhabited UInt256 := ⟨⟨0, MOD_pos⟩⟩
 
 def zero : UInt256 := ⟨0, MOD_pos⟩
-def one : UInt256 := ⟨1, by native_decide⟩
+def one : UInt256 := ⟨1, by decide⟩
+
 
 instance (n : Nat) : OfNat UInt256 n := ⟨⟨⟨n % MOD, Nat.mod_lt _ MOD_pos⟩⟩⟩
 
 def toNat (x : UInt256) : Nat := x.val.val
+
+/-- Kernel-unfolding fact for the multiplicative identity, suitable for proof audits. -/
+@[simp] theorem one_toNat : one.toNat = 1 := by rfl
 
 def ofNat (n : Nat) : UInt256 := ⟨⟨n % MOD, Nat.mod_lt _ MOD_pos⟩⟩
 

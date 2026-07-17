@@ -3,6 +3,10 @@
   Pure Lean 4, no FFI, no opaque.
 -/
 
+module
+
+@[expose] public section
+
 namespace ETHCryptoLean.BN256
 
 -- ============================================================

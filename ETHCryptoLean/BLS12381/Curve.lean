@@ -4,7 +4,10 @@
   E': y² = x³ + 4(1+u) (over Fp2, sextic twist)
 -/
 
-import ETHCryptoLean.BLS12381.Fields
+module
+public import ETHCryptoLean.BLS12381.Fields
+
+@[expose] public section
 
 namespace BLS12381
 

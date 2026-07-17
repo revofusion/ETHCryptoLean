@@ -1,9 +1,13 @@
+module
+
 /-!
 # Modular Exponentiation
 
 EVM precompile at address 0x05. Computes `base^exp mod modulus` using
 binary square-and-multiply.
 -/
+
+@[expose] public section
 
 namespace ETHCryptoLean.ModExp
 
