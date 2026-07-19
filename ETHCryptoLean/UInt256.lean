@@ -9,6 +9,11 @@ module
 def UInt256.MOD : Nat := 2 ^ 256
 
 theorem UInt256.MOD_pos : 0 < UInt256.MOD := by decide
+/- Kernel-evaluated bound used by `UInt256.one`; keeping it named makes
+   unfolding audits inspect the proof directly instead of relying on a
+   compiler reduction axiom. -/
+theorem UInt256.one_lt_mod : 1 < UInt256.MOD := by decide
+
 
 structure UInt256 where
   val : Fin UInt256.MOD
@@ -19,7 +24,7 @@ namespace UInt256
 instance : Inhabited UInt256 := ⟨⟨0, MOD_pos⟩⟩
 
 def zero : UInt256 := ⟨0, MOD_pos⟩
-def one : UInt256 := ⟨1, by decide⟩
+def one : UInt256 := ⟨1, UInt256.one_lt_mod⟩
 
 
 instance (n : Nat) : OfNat UInt256 n := ⟨⟨⟨n % MOD, Nat.mod_lt _ MOD_pos⟩⟩⟩
